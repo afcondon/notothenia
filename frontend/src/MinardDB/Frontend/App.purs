@@ -13,12 +13,18 @@ import Data.Int as Int
 import Data.Maybe (Maybe(..))
 import Data.String as String
 import Data.Traversable (traverse)
+import Effect (Effect)
 import Effect.Aff.Class (class MonadAff)
+import Effect.Class (liftEffect)
 import Foreign.Object as Object
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
+import MinardDB.Frontend.Topology (SchemaData, parseSchemaData, topologyView)
+import Web.HTML (window)
+import Web.HTML.Location (hash, setHash)
+import Web.HTML.Window (location)
 
 apiBase :: String
 apiBase = "http://localhost:3080"
@@ -57,6 +63,7 @@ type Detail =
   { summary :: Summary
   , inferredFKs :: Array InferredFK
   , proofs :: Array Proof
+  , schema :: Maybe SchemaData
   }
 
 -- Component ---
@@ -101,20 +108,20 @@ initialState =
 
 handleAction :: forall o m. MonadAff m => Action -> H.HalogenM State Action () o m Unit
 handleAction = case _ of
-  Initialize -> loadList
+  Initialize -> do
+    loadList
+    -- Hash-deep-link: `#42` on load drops the user straight into the
+    -- analysis detail. Reload-survival + shareable URLs.
+    h <- liftEffect readHash
+    case parseHashId h of
+      Just id -> selectAnalysis id
+      Nothing -> pure unit
   Refresh -> loadList
   BackToList -> do
+    liftEffect (writeHash "")
     H.modify_ _ { view = ListView }
     loadList
-  SelectAnalysis id -> do
-    H.modify_ _ { view = LoadingDetail id }
-    resp <- H.liftAff $ AX.get RF.string (apiBase <> "/api/analyses/" <> show id)
-    case resp of
-      Left err ->
-        H.modify_ _ { view = ErrorView (AX.printError err) }
-      Right r -> case jsonParser r.body >>= parseDetail of
-        Left err -> H.modify_ _ { view = ErrorView err }
-        Right d -> H.modify_ _ { view = DetailView d }
+  SelectAnalysis id -> selectAnalysis id
   where
     loadList = do
       H.modify_ _ { loading = true, error = Nothing }
@@ -124,6 +131,29 @@ handleAction = case _ of
         Right r -> case jsonParser r.body >>= parseList of
           Left err -> H.modify_ _ { loading = false, error = Just err }
           Right xs -> H.modify_ _ { loading = false, analyses = xs }
+
+    selectAnalysis id = do
+      liftEffect (writeHash ("#" <> show id))
+      H.modify_ _ { view = LoadingDetail id }
+      resp <- H.liftAff $ AX.get RF.string (apiBase <> "/api/analyses/" <> show id)
+      case resp of
+        Left err ->
+          H.modify_ _ { view = ErrorView (AX.printError err) }
+        Right r -> case jsonParser r.body >>= parseDetail of
+          Left err -> H.modify_ _ { view = ErrorView err }
+          Right d -> H.modify_ _ { view = DetailView d }
+
+-- | Hash routing helpers: a single Int after `#` selects an analysis.
+readHash :: Effect String
+readHash = window >>= location >>= hash
+
+writeHash :: String -> Effect Unit
+writeHash h = window >>= location >>= setHash h
+
+parseHashId :: String -> Maybe Int
+parseHashId h =
+  String.stripPrefix (String.Pattern "#") h
+    >>= Int.fromString
 
 -- Render ---
 
@@ -217,10 +247,26 @@ renderDetail d =
     , noDeclaredFKsWarning d
     , noDeclaredFKsExplainer d
     , inferredFKsSection d.inferredFKs
+    , topologySection d
     , cycleExplainer d
     , bcnfExplainer d
     , proofsSection d.proofs
     ]
+
+-- | Render the topology view when the backend was able to re-read the
+-- | source JSON. The view consumes the analysis's proofs to highlight
+-- | tables involved in cycles (NoFKCycle witness) or BCNF violations.
+topologySection :: forall a. Detail -> HH.HTML a Action
+topologySection d = case d.schema of
+  Nothing -> HH.text ""
+  Just s ->
+    let
+      highlights =
+        { cycleWitness: findCycleProof d
+        , bcnfViolator: findBCNFProof d <#> _.witnessTable
+        }
+    in
+      topologyView s highlights
 
 noDeclaredFKsWarning :: forall a. Detail -> HH.HTML a Action
 noDeclaredFKsWarning d =
@@ -709,7 +755,16 @@ parseDetail j = do
   proofsJ <- Object.lookup "proofs" obj # note "missing proofs"
   proofsArr <- toArray proofsJ # note "proofs not an array"
   proofs <- traverse parseProof proofsArr
-  pure { summary, inferredFKs, proofs }
+  -- schema is best-effort: missing or null means the source JSON could
+  -- not be read (file moved / deleted since analysis was captured). The
+  -- topology section is conditional, so the rest of the page still
+  -- renders.
+  let schema = case Object.lookup "schema" obj of
+        Just sj | not (J.isNull sj) -> case parseSchemaData sj of
+          Right s -> Just s
+          Left _ -> Nothing
+        _ -> Nothing
+  pure { summary, inferredFKs, proofs, schema }
 
 parseFK :: Json -> Either String InferredFK
 parseFK j = do

@@ -43,9 +43,21 @@ member it actually is.
   TREE smoke fixture, `CyclicShape UNSAT` corroborates `NoFKCycle`
   PROVEN — the proof has bite because the constraints actively
   rule out cycles, not just "we didn't happen to find one".
-- **2d (topology view)** — remaining. Hylograph schema graph with
-  per-table normal-form colouring, violation edges highlighted,
-  fault-localized FD called out.
+- **2d (topology view)** — sacrificial SVG MVP done. Halogen
+  component (`MinardDB.Frontend.Topology`) renders tables as
+  rounded rects in a topologically-sorted layered layout, edges
+  as Bézier curves, cycle witnesses with red borders, self-
+  loops as small arcs, BCNF violators with orange fill. Schema
+  data flows through a re-read of the original JSON source on
+  the GetAnalysis endpoint; degrades gracefully if the source
+  file is gone. Hash-deep-link (`/#<id>`) added in passing for
+  reload-survival and shareable URLs. The MVP exposes layout
+  problems a force-directed Hylograph version would solve:
+  layer 0 collects every source table into one long row,
+  hubs aren't drawn as hubs, and the self-loop ornament is too
+  small to read as "cycle of length 1". Topology view is
+  retained as a learning artifact until the Hylograph-backed
+  rewrite lands.
 
 **Note: Data Model section below has drifted.** The plan originally
 described a shared `minard_db_*` namespace inside Minard's DuckDB.

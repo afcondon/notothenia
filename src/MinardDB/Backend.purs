@@ -10,11 +10,16 @@ import Data.Generic.Rep (class Generic)
 import Data.Int as Int
 import Data.Maybe (Maybe(..))
 import Data.Tuple.Nested ((/\))
+import Effect.Aff (Aff, attempt)
 import Effect.Aff.Class (liftAff)
 import Foreign.Object as Object
 import HTTPurple (Method(..), ServerM, badRequest, notFound, ok', serve)
 import HTTPurple.Headers (ResponseHeaders, headers)
 import MinardDB.Read (AnalysisDetail, AnalysisSummary, InferredFKRow, ProofRow, defaultReadConfig, getAnalysis, listAnalyses)
+import MinardDB.Schema (FKAction, ForeignKey, Schema, Table)
+import MinardDB.Schema.JSON (parseSchemaFull)
+import Node.Encoding (Encoding(..))
+import Node.FS.Aff as FS
 import Routing.Duplex (RouteDuplex', int, path, root, segment)
 import Routing.Duplex.Generic (noArgs, sum)
 
@@ -60,7 +65,9 @@ main = serve { port: 3080, hostname: "localhost" } { route: routes, router }
       case result of
         Left err -> badRequest err
         Right Nothing -> notFound
-        Right (Just detail) -> ok' corsHeaders (stringify (encodeDetail detail))
+        Right (Just detail) -> do
+          mschema <- liftAff $ tryReadSchema detail.summary.sourcePath
+          ok' corsHeaders (stringify (encodeDetail detail mschema))
 
 -- JSON encoders --------------------------------------------------------------
 
@@ -81,12 +88,62 @@ encodeSummary s = J.fromObject $ Object.fromFoldable
   , "inferredFKCount" /\ J.fromNumber (Int.toNumber s.inferredFKCount)
   ]
 
-encodeDetail :: AnalysisDetail -> Json
-encodeDetail d = J.fromObject $ Object.fromFoldable
+encodeDetail :: AnalysisDetail -> Maybe Schema -> Json
+encodeDetail d mschema = J.fromObject $ Object.fromFoldable
   [ "summary"     /\ encodeSummary d.summary
   , "inferredFKs" /\ J.fromArray (map encodeFK d.inferredFKs)
   , "proofs"      /\ J.fromArray (map encodeProof d.proofs)
+  , "schema"      /\ case mschema of
+      Just s  -> encodeSchema s
+      Nothing -> J.jsonNull
   ]
+
+-- | Encode a parsed Schema for the topology view: a list of tables
+-- | (name + columnCount + pkColumns) and a flat list of FKs (source
+-- | table + column(s) + ref table + onDelete). Inferred FKs are merged
+-- | in via parseSchemaFull's `withInferred` view so the topology shows
+-- | the same FK graph the proof catalog ran against.
+encodeSchema :: Schema -> Json
+encodeSchema s = J.fromObject $ Object.fromFoldable
+  [ "name"   /\ J.fromString s.name
+  , "tables" /\ J.fromArray (map encodeTable s.tables)
+  , "fks"    /\ J.fromArray (Array.concatMap tableFKs s.tables)
+  ]
+  where
+    tableFKs :: Table -> Array Json
+    tableFKs t = map (encodeFKEdge t.name) t.foreignKeys
+
+encodeTable :: Table -> Json
+encodeTable t = J.fromObject $ Object.fromFoldable
+  [ "name"        /\ J.fromString t.name
+  , "columnCount" /\ J.fromNumber (Int.toNumber (Array.length t.columns))
+  , "primaryKey"  /\ J.fromArray (map J.fromString t.primaryKey)
+  ]
+
+encodeFKEdge :: String -> ForeignKey -> Json
+encodeFKEdge srcTable fk = J.fromObject $ Object.fromFoldable
+  [ "sourceTable"   /\ J.fromString srcTable
+  , "sourceColumns" /\ J.fromArray (map J.fromString fk.columns)
+  , "refTable"      /\ J.fromString fk.refTable
+  , "refColumns"    /\ J.fromArray (map J.fromString fk.refColumns)
+  , "onDelete"      /\ J.fromString (showFKAction fk.onDelete)
+  ]
+
+showFKAction :: FKAction -> String
+showFKAction = show
+
+-- | Best-effort schema read for the topology view. We merge inferred FKs
+-- | into the FK list (matching what the proof catalog actually ran
+-- | against). If the source file has moved or is unreadable we return
+-- | Nothing and the frontend gracefully degrades — better than 500ing
+-- | the whole detail endpoint over a missing fixture.
+tryReadSchema :: String -> Aff (Maybe Schema)
+tryReadSchema path = do
+  attempt (FS.readTextFile UTF8 path) >>= case _ of
+    Left _ -> pure Nothing
+    Right text -> case parseSchemaFull text of
+      Left _ -> pure Nothing
+      Right parsed -> pure (Just parsed.withInferred)
 
 encodeFK :: InferredFKRow -> Json
 encodeFK fk = J.fromObject $ Object.fromFoldable

@@ -17,7 +17,11 @@ package:
     - foldable-traversable
     - foreign-object
     - halogen
+    - halogen-svg-elems
+    - integers
     - maybe
+    - numbers
+    - ordered-collections
     - prelude
     - strings
     - transformers
