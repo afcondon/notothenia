@@ -6,7 +6,6 @@ import Data.Argonaut.Core (Json, toArray, toBoolean, toObject, toString)
 import Data.Argonaut.Parser (jsonParser)
 import Data.Array as Array
 import Data.Either (Either(..))
-import Data.Foldable (sum)
 import Data.Maybe (Maybe(..))
 import Data.Traversable (traverse)
 import Foreign.Object (Object)
@@ -18,15 +17,21 @@ import MinardDB.Schema (Column, FKAction(..), ForeignKey, PGType(..), Schema, Ta
 parseSchema :: String -> Either String Schema
 parseSchema text = parseSchemaFull text <#> _.declared
 
--- | Result of parsing a schema JSON file: the canonical declared schema
--- | plus a separate count and list of inferred FKs (candidates).
+-- | An inferred FK with its source table preserved (the FK type itself
+-- | doesn't track which table it lives on, since within a Table we
+-- | already know).
+type InferredFK =
+  { sourceTable :: String
+  , columns :: Array String
+  , refTable :: String
+  , refColumns :: Array String
+  }
+
+-- | Result of parsing a schema JSON file.
 type ParsedSchema =
   { declared :: Schema
-  , inferredFKCount :: Int
-  -- | A version of the schema with inferred FKs merged into foreignKeys,
-  -- | suitable for running proofs against the "what if these were
-  -- | declared?" scenario.
-  , withInferred :: Schema
+  , withInferred :: Schema  -- declared FKs + inferred FKs, merged for proof
+  , inferredFKs :: Array InferredFK
   }
 
 parseSchemaFull :: String -> Either String ParsedSchema
@@ -37,15 +42,32 @@ parseSchemaFull text = do
   tablesJ <- objArray obj "tables"
   declaredTables <- traverse (parseTable false) tablesJ
   mergedTables <- traverse (parseTable true) tablesJ
-  let inferredCount = sumInferred mergedTables - sumDeclared declaredTables
+  inferredFKs <- Array.concat <$> traverse extractInferredFKs tablesJ
   pure
     { declared: { name, tables: declaredTables }
-    , inferredFKCount: inferredCount
     , withInferred: { name, tables: mergedTables }
+    , inferredFKs
     }
-  where
-    sumDeclared ts = ts # map (\t -> Array.length t.foreignKeys) # sum
-    sumInferred ts = ts # map (\t -> Array.length t.foreignKeys) # sum
+
+-- | Pull the inferredForeignKeys array off a raw table JSON value,
+-- | tagging each entry with its source table name.
+extractInferredFKs :: Json -> Either String (Array InferredFK)
+extractInferredFKs j = do
+  obj <- j # toObject # note "table not an object"
+  srcTable <- objString obj "name"
+  case Object.lookup "inferredForeignKeys" obj of
+    Nothing -> Right []
+    Just ij -> case toArray ij of
+      Nothing -> Right []
+      Just arr -> traverse (parseInferred srcTable) arr
+
+parseInferred :: String -> Json -> Either String InferredFK
+parseInferred srcTable j = do
+  obj <- j # toObject # note "inferredFK not an object"
+  columns <- objStringArray obj "columns"
+  refTable <- objString obj "refTable"
+  refColumns <- objStringArray obj "refColumns"
+  pure { sourceTable: srcTable, columns, refTable, refColumns }
 
 -- | If `includeInferred` is true, merge `inferredForeignKeys` into
 -- | `foreignKeys`. Otherwise only declared FKs are used.
