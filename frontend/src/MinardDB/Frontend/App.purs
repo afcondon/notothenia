@@ -11,6 +11,7 @@ import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Int as Int
 import Data.Maybe (Maybe(..))
+import Data.String as String
 import Data.Traversable (traverse)
 import Effect.Aff.Class (class MonadAff)
 import Foreign.Object as Object
@@ -213,7 +214,9 @@ renderDetail d =
         , stat "inferred FKs" d.summary.inferredFKCount
         ]
     , noDeclaredFKsWarning d
+    , noDeclaredFKsExplainer d
     , inferredFKsSection d.inferredFKs
+    , cycleExplainer d
     , proofsSection d.proofs
     ]
 
@@ -229,18 +232,173 @@ noDeclaredFKsWarning d =
           , HH.strong_ [ HH.text "zero" ]
           , HH.text " declared FK constraints. Referential integrity is entirely application-mediated."
           ]
+      ]
+  else
+    HH.text ""
+
+noDeclaredFKsExplainer :: forall a. Detail -> HH.HTML a Action
+noDeclaredFKsExplainer d =
+  if d.summary.declaredFKCount == 0 && d.summary.inferredFKCount > 0 then
+    HH.section [ HP.class_ (HH.ClassName "explainer") ]
+      [ HH.h3_ [ HH.text "What is a foreign key, and why does this matter?" ]
       , HH.p_
-          [ HH.text "Below are "
+          [ HH.text "A "
+          , HH.em_ [ HH.text "foreign key" ]
+          , HH.text " is a constraint that says: "
+          , HH.q_ [ HH.text "this column must point at a real row in some other table." ]
+          ]
+      , HH.p_
+          [ HH.text "Concretely: when an application creates a note about a project, that note has a "
+          , HH.code_ [ HH.text "project_id" ]
+          , HH.text " column. A foreign key constraint would tell the database: "
+          , HH.q_ [ HH.text "this project_id must match an actual id in the projects table." ]
+          ]
+      , HH.p_ [ HH.text "When the database enforces foreign keys:" ]
+      , HH.ul_
+          [ HH.li_ [ HH.text "It refuses to insert a note pointing at a project that doesn't exist." ]
+          , HH.li_ [ HH.text "It can automatically delete the notes when you delete the project (ON DELETE CASCADE)." ]
+          , HH.li_ [ HH.text "It guarantees that JOINs return real data, not orphans." ]
+          ]
+      , HH.h4_ [ HH.text "What it means that none are declared" ]
+      , HH.p_
+          [ HH.text "Your schema has "
           , HH.strong_ [ HH.text (show d.summary.inferredFKCount) ]
-          , HH.text " candidate FKs inferred from "
-          , HH.code_ [ HH.text "<entity>_id" ]
-          , HH.text " column-naming conventions. The proof results show what would hold "
-          , HH.em_ [ HH.text "if" ]
-          , HH.text " these were declared."
+          , HH.text " columns that "
+          , HH.em_ [ HH.text "look like" ]
+          , HH.text " foreign keys (named "
+          , HH.code_ [ HH.text "project_id" ]
+          , HH.text ", "
+          , HH.code_ [ HH.text "tag_id" ]
+          , HH.text ", etc.) but none are declared as constraints. Right now, nothing in the database itself prevents:"
+          ]
+      , HH.ul_
+          [ HH.li_
+              [ HH.text "A "
+              , HH.code_ [ HH.text "project_notes" ]
+              , HH.text " row with "
+              , HH.code_ [ HH.text "project_id = 99999" ]
+              , HH.text " (where no such project exists)."
+              ]
+          , HH.li_
+              [ HH.text "Half-deleted state: removing a project leaves its notes, servers, tags, and dependencies as orphans pointing into the void."
+              ]
+          , HH.li_
+              [ HH.text "Bugs and ad-hoc SQL silently producing inconsistent data."
+              ]
+          ]
+      , HH.p_
+          [ HH.text "All of this is enforced (if at all) by application code. Every place that inserts or updates a row has to remember to validate references; every place that deletes has to remember to clean up children. Miss one path and you get corruption."
+          ]
+      , HH.h4_ [ HH.text "How to fix" ]
+      , HH.p_
+          [ HH.text "For each candidate FK below, add a declaration like:" ]
+      , HH.pre_
+          [ HH.code_ [ HH.text
+              "ALTER TABLE project_notes\n  ADD FOREIGN KEY (project_id)\n  REFERENCES projects(id)\n  ON DELETE CASCADE;"
+            ]
+          ]
+      , HH.p_
+          [ HH.text "Before declaring, you need to (a) find and clean up any existing orphan rows, and (b) decide the appropriate "
+          , HH.code_ [ HH.text "ON DELETE" ]
+          , HH.text " action: "
+          , HH.code_ [ HH.text "CASCADE" ]
+          , HH.text " (delete children too), "
+          , HH.code_ [ HH.text "RESTRICT" ]
+          , HH.text " (refuse the delete if children exist), or "
+          , HH.code_ [ HH.text "SET NULL" ]
+          , HH.text " (orphan the children but keep them — only when the column is nullable)."
+          ]
+      , HH.p_
+          [ HH.text "The "
+          , HH.strong_ [ HH.text (show d.summary.inferredFKCount) ]
+          , HH.text " candidates in the table below are our best guess based on column naming. Some may be wrong — review each before adopting."
           ]
       ]
   else
     HH.text ""
+
+cycleExplainer :: forall a. Detail -> HH.HTML a Action
+cycleExplainer d =
+  case findCycleProof d of
+    Nothing -> HH.text ""
+    Just witnessTable ->
+      HH.section [ HP.class_ (HH.ClassName "explainer") ]
+        [ HH.h3_ [ HH.text "Why is there a cycle, and what does that mean?" ]
+        , HH.p_
+            [ HH.text "The proof "
+            , HH.code_ [ HH.text "NoFKCycle" ]
+            , HH.text " found a counterexample in "
+            , HH.code_ [ HH.text witnessTable ]
+            , HH.text ". This is almost always because that table has a "
+            , HH.em_ [ HH.text "self-referencing" ]
+            , HH.text " foreign key — a column on the table that points back to the same table."
+            ]
+        , HH.p_
+            [ HH.text "Self-references represent trees. A project can have a parent project; a namespace can have a parent namespace. Conceptually it's a tree — but the database doesn't know it's supposed to be a tree. It only knows: "
+            , HH.q_ [ HH.text "this column points at some row in the same table." ]
+            , HH.text " Nothing prevents pointing at yourself, or in a circle."
+            ]
+        , HH.p_
+            [ HH.text "A "
+            , HH.em_ [ HH.text "cycle" ]
+            , HH.text " would mean: A's parent is B, and B's parent is A. Or longer: A → B → C → A. In a real tree this is logical nonsense — neither node is "
+            , HH.q_ [ HH.text "above" ]
+            , HH.text " the other. But the schema permits it, and the proof solver found a specific configuration where it happens: a row that ends up as its own ancestor."
+            ]
+        , HH.h4_ [ HH.text "Why this matters" ]
+        , HH.ul_
+            [ HH.li_
+                [ HH.text "Code that walks the parent chain — "
+                , HH.q_ [ HH.text "show me this project and all its ancestors" ]
+                , HH.text " — loops forever if it hits a cycle. Stack overflow or a hung request."
+                ]
+            , HH.li_
+                [ HH.text "Aggregations — "
+                , HH.q_ [ HH.text "roll up time spent across all subprojects" ]
+                , HH.text " — either loop or double-count, depending on the query."
+                ]
+            , HH.li_
+                [ HH.text "A new developer writing tree-walking code has no way to know they need to defend against cycles. The schema gives no warning."
+                ]
+            ]
+        , HH.h4_ [ HH.text "How to fix" ]
+        , HH.p_
+            [ HH.text "Database-level options, ordered by completeness:" ]
+        , HH.ol_
+            [ HH.li_
+                [ HH.strong_ [ HH.text "Application-side check on every UPDATE." ]
+                , HH.text " Before changing a parent_id, walk up the chain to verify no cycle would result. Simple, but easy to forget — a single bug bypasses it."
+                ]
+            , HH.li_
+                [ HH.strong_ [ HH.text "CHECK constraint." ]
+                , HH.text " "
+                , HH.code_ [ HH.text "CHECK (id != parent_id)" ]
+                , HH.text " prevents direct self-loops, but not multi-step cycles. Better than nothing; DuckDB supports it."
+                ]
+            , HH.li_
+                [ HH.strong_ [ HH.text "BEFORE-UPDATE trigger." ]
+                , HH.text " A trigger that walks the parent chain at insert/update time and rejects the change if it would create a cycle. Complete but DB-specific."
+                ]
+            , HH.li_
+                [ HH.strong_ [ HH.text "Closure table." ]
+                , HH.text " A separate table tracking every (ancestor, descendant) pair, kept in sync via triggers. Cycles become physically impossible because they would require inserting (A, A), which violates a uniqueness constraint. Most robust but requires changes to all tree-walking code."
+                ]
+            ]
+        ]
+
+-- | Detect a NoFKCycle counterexample and pull out the witness's table name.
+findCycleProof :: Detail -> Maybe String
+findCycleProof d =
+  Array.find (\p -> p.commandName == "NoFKCycle" && p.verdict == "SAT") d.proofs
+    >>= _.witness
+    >>= extractWitnessTable
+
+-- | A witness atom like `module_namespaces$7` → table name `module_namespaces`.
+extractWitnessTable :: String -> Maybe String
+extractWitnessTable atom =
+  case Array.head (String.split (String.Pattern "$") atom) of
+    Just t | t /= "" -> Just t
+    _ -> Nothing
 
 inferredFKsSection :: forall a. Array InferredFK -> HH.HTML a Action
 inferredFKsSection fks =
