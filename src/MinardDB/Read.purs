@@ -53,6 +53,7 @@ type ProofRow =
   , interpretation :: String
   , witness :: Maybe String
   , scope :: Int
+  , minScope :: Maybe Int
   }
 
 -- | Config for reading. We share dbPath / duckdbBinary with Storage.
@@ -86,7 +87,7 @@ getAnalysis cfg id = do
   let fksSql = "SELECT source_table, source_columns, ref_table, ref_columns "
                  <> "FROM analysis_inferred_fks WHERE analysis_id = " <> show id
                  <> " ORDER BY source_table, source_columns"
-  let proofsSql = "SELECT command_name, kind, source, verdict, interpretation, witness, scope "
+  let proofsSql = "SELECT command_name, kind, source, verdict, interpretation, witness, scope, min_scope "
                     <> "FROM analysis_proofs WHERE analysis_id = " <> show id
                     <> " ORDER BY command_name"
 
@@ -156,7 +157,12 @@ parseProof j = do
   let witness = case Object.lookup "witness" o of
         Just wj | not (J.isNull wj) -> toString wj
         _ -> Nothing
-  pure { commandName, kind, source, verdict, interpretation, witness, scope }
+  let minScope = case Object.lookup "min_scope" o of
+        Just mj | not (J.isNull mj) -> case toNumber mj of
+          Just n -> Just (Int.round n)
+          Nothing -> Nothing
+        _ -> Nothing
+  pure { commandName, kind, source, verdict, interpretation, witness, scope, minScope }
 
 objStr :: Object.Object Json -> String -> Either String String
 objStr o k =

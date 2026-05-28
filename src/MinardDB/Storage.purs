@@ -41,7 +41,12 @@ type AnalysisRecord =
   -- | One entry per inferred FK: (source_table, source_columns, ref_table, ref_columns)
   , inferredFKs :: Array { sourceTable :: String, columns :: Array String, refTable :: String, refColumns :: Array String }
   -- | One entry per Alloy command run.
-  , proofs :: Array { command :: CommandResult, witness :: Maybe String, scope :: Int }
+  , proofs :: Array
+      { command :: CommandResult
+      , witness :: Maybe String
+      , scope :: Int
+      , minScope :: Maybe Int  -- populated by Minimize when a SAT check is shrunk
+      }
   }
 
 -- | Persist a record. Returns the analysis_id assigned by the DB.
@@ -105,6 +110,9 @@ generateInserts rec =
                 witness = case p.witness of
                   Just w -> str w
                   Nothing -> "NULL"
+                minScope = case p.minScope of
+                  Just n -> show n
+                  Nothing -> "NULL"
             in
               "(currval('seq_analyses')"
                 <> ", " <> str c.name
@@ -113,9 +121,10 @@ generateInserts rec =
                 <> ", " <> str (show c.verdict)
                 <> ", " <> str (interpret c)
                 <> ", " <> witness
-                <> ", " <> show p.scope <> ")"
+                <> ", " <> show p.scope
+                <> ", " <> minScope <> ")"
         in
-          "INSERT INTO analysis_proofs (analysis_id, command_name, kind, source, verdict, interpretation, witness, scope) VALUES\n  "
+          "INSERT INTO analysis_proofs (analysis_id, command_name, kind, source, verdict, interpretation, witness, scope, min_scope) VALUES\n  "
             <> intercalate ",\n  " values <> ";"
 
     interpret c = case c.kind, c.verdict of

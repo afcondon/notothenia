@@ -107,4 +107,7 @@ encodeProof p = J.fromObject $ Object.fromFoldable
       Just w -> J.fromString w
       Nothing -> J.jsonNull
   , "scope"          /\ J.fromNumber (Int.toNumber p.scope)
+  , "minScope"       /\ case p.minScope of
+      Just n -> J.fromNumber (Int.toNumber n)
+      Nothing -> J.jsonNull
   ]

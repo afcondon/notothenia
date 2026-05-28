@@ -50,6 +50,7 @@ type Proof =
   , interpretation :: String
   , witness :: Maybe String
   , scope :: Int
+  , minScope :: Maybe Int
   }
 
 type Detail =
@@ -616,6 +617,7 @@ proofsSection proofs =
             ]
         , HH.tbody_ (map proofRow proofs)
         ]
+    , scopeFootnote proofs
     ]
 
 proofRow :: forall a. Proof -> HH.HTML a Action
@@ -623,7 +625,7 @@ proofRow p =
   HH.tr [ HP.class_ (HH.ClassName ("proof-row " <> verdictClass p)) ]
     [ HH.td_ [ HH.code_ [ HH.text p.commandName ] ]
     , HH.td_ [ HH.text p.kind ]
-    , HH.td_ [ HH.text (show p.scope) ]
+    , HH.td_ [ scopeCell p ]
     , HH.td [ HP.class_ (HH.ClassName "verdict") ]
         [ HH.text p.verdict ]
     , HH.td_ [ HH.text p.interpretation ]
@@ -632,6 +634,41 @@ proofRow p =
         Nothing -> HH.text "—"
       ]
     ]
+
+-- | Scope cell: shows "N" normally, or "N → m" when minimization found a
+-- | smaller scope at which the property still breaks (m < N). The arrow
+-- | mirrors QuickCheck's "shrunken counterexample" notation.
+scopeCell :: forall a. Proof -> HH.HTML a Action
+scopeCell p = case p.minScope of
+  Just m | m < p.scope ->
+    HH.span_
+      [ HH.text (show p.scope)
+      , HH.span [ HP.class_ (HH.ClassName "min-scope") ]
+          [ HH.text (" → " <> show m) ]
+      ]
+  _ -> HH.text (show p.scope)
+
+-- | Footnote explaining scope notation if any row has been minimized.
+scopeFootnote :: forall a. Array Proof -> HH.HTML a Action
+scopeFootnote proofs =
+  if Array.any wasMinimized proofs then
+    HH.p [ HP.class_ (HH.ClassName "scope-footnote") ]
+      [ HH.text "Scope is the bound on rows-per-table Alloy considers. "
+      , HH.code_ [ HH.text "N → m" ]
+      , HH.text " means the property first failed at scope "
+      , HH.code_ [ HH.text "N" ]
+      , HH.text " and still fails at scope "
+      , HH.code_ [ HH.text "m" ]
+      , HH.text " (binary-searched downward, like a property-test shrinker). Smaller minimum scopes mean more debuggable counterexamples — "
+      , HH.code_ [ HH.text "m = 1" ]
+      , HH.text " is a single-row witness."
+      ]
+  else
+    HH.text ""
+  where
+    wasMinimized p = case p.minScope of
+      Just m -> m < p.scope
+      Nothing -> false
 
 verdictClass :: Proof -> String
 verdictClass p = case p.kind, p.verdict of
@@ -695,7 +732,12 @@ parseProof j = do
   let witness = case Object.lookup "witness" obj of
         Just wj | not (J.isNull wj) -> toString wj
         _ -> Nothing
-  pure { commandName, kind, source, verdict, interpretation, witness, scope }
+  let minScope = case Object.lookup "minScope" obj of
+        Just mj | not (J.isNull mj) -> case toNumber mj of
+          Just n -> Just (Int.round n)
+          Nothing -> Nothing
+        _ -> Nothing
+  pure { commandName, kind, source, verdict, interpretation, witness, scope, minScope }
 
 objStr :: Object.Object Json -> String -> Either String String
 objStr o k = Object.lookup k o # note ("missing " <> k)

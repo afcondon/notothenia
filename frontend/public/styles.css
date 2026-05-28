@@ -285,6 +285,30 @@ td code, .source-path code {
   border-radius: 3px;
 }
 
+/* Scope minimization --------------------------------------------------- */
+
+.min-scope {
+  color: #c62828;
+  font-weight: 600;
+}
+
+.scope-footnote {
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+  color: #666;
+  line-height: 1.55;
+  font-style: italic;
+}
+
+.scope-footnote code {
+  font-style: normal;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: #f0f0f0;
+  padding: 0.05em 0.35em;
+  border-radius: 2px;
+}
+
 /* Proof verdict colours ------------------------------------------------ */
 
 .proof-row.ok .verdict {

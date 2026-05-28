@@ -1,6 +1,7 @@
 module MinardDB.Alloy.Generate
   ( generate
   , generateWith
+  , generateWithChecks
   , validityBanner
   , propertyBanner
   ) where
@@ -14,7 +15,7 @@ import Data.Maybe (Maybe(..))
 import Data.Set (Set)
 import Data.Set as Set
 import MinardDB.Alloy.Names (fieldName, sigName)
-import MinardDB.Properties (Property, defaultProperties, defaultScope, renderCheck)
+import MinardDB.Properties (AlloyCheck, Property, defaultProperties, defaultScope, renderCheck)
 import MinardDB.Schema (Column, ForeignKey, PGType(..), Schema, Table, UniqueConstraint)
 
 -- | Render a Schema as an Alloy model with the default property catalog.
@@ -39,12 +40,19 @@ generate = generateWith defaultProperties
 -- | property smoke test).
 generateWith :: Array Property -> Schema -> String
 generateWith properties schema =
+  generateWithChecks (properties >>= (_ $ schema)) schema
+
+-- | Render a Schema as an Alloy model with explicit `AlloyCheck` values
+-- | (already resolved against a schema). The scope minimization driver
+-- | uses this to regenerate a model with a single check at a chosen
+-- | scope, holding the validity facts constant.
+generateWithChecks :: Array AlloyCheck -> Schema -> String
+generateWithChecks checks schema =
   let
     primSigs = renderPrimSigs (collectPrimTypes schema)
     tableSigs = map renderTable schema.tables
     uniqueFacts = Array.concatMap renderUniqueFacts schema.tables
     showWitness = "pred show {}\nrun show for " <> show (defaultScope schema)
-    checks = properties >>= (_ $ schema)
     propertyTexts = map renderCheck checks
   in
     intercalate "\n\n" $

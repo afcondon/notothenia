@@ -36,5 +36,6 @@ CREATE TABLE IF NOT EXISTS analysis_proofs (
     interpretation        VARCHAR     NOT NULL,
     witness               VARCHAR,
     scope                 INTEGER     NOT NULL,
+    min_scope             INTEGER,                          -- nullable; populated when a SAT check is shrunk
     PRIMARY KEY (analysis_id, command_name)
 );

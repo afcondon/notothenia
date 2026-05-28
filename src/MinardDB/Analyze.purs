@@ -15,7 +15,9 @@ import Effect.Class (liftEffect)
 import Effect.Class.Console as Console
 import MinardDB.Alloy.Generate (generate)
 import MinardDB.Alloy.Invoke (defaultConfig, runAlloy)
+import MinardDB.Alloy.Minimize (minimizeScope)
 import MinardDB.Alloy.Receipt (CommandKind(..), CommandResult, Verdict(..), parseReceipt)
+import MinardDB.Properties (AlloyCheck, defaultProperties, defaultScope)
 import MinardDB.Schema (Schema)
 import MinardDB.Schema.JSON (ParsedSchema, parseSchemaFull)
 import MinardDB.Storage (AnalysisRecord, defaultStorageConfig, store)
@@ -64,22 +66,60 @@ analyzeParsed sourcePath parsed = do
       traverse_ (Console.log <<< ("  " <> _) <<< formatRow) cmds
       witnesses <- traverse (fetchWitness scheme.name) cmds
       traverse_ printWitness (Array.zip cmds witnesses)
-      persist sourcePath parsed declaredFKs inferredCount cmds witnesses
+      let catalog = defaultProperties >>= (_ $ scheme)
+      let satCount = Array.length $ Array.filter
+            (\c -> c.kind == Check && c.verdict == Counterexample) cmds
+      when (satCount > 0) do
+        Console.log ""
+        Console.log $ "Minimizing scope for " <> show satCount
+          <> " SAT verdict(s) (binary search downward)…"
+      proofs <- traverse (buildProof catalog scheme) (Array.zip cmds witnesses)
+      traverse_ printMinScope proofs
+      persist sourcePath parsed declaredFKs inferredCount proofs
+
+-- | A proof record carrying everything we need to persist a single
+-- | Alloy command's outcome: the raw verdict, the witness atom (if any),
+-- | the scope at which Alloy was invoked, and (for SAT verdicts) the
+-- | smallest scope at which the property still breaks.
+type ProofRecord =
+  { command :: CommandResult
+  , witness :: Maybe String
+  , scope :: Int
+  , minScope :: Maybe Int
+  }
+
+-- | Build a proof record from a command + witness. For SAT verdicts, runs
+-- | scope minimization in the background (binary search downward) to find
+-- | the smallest counterexample-producing scope.
+buildProof :: Array AlloyCheck -> Schema -> Tuple CommandResult (Maybe String) -> Aff ProofRecord
+buildProof catalog schema (Tuple cmd witness) = do
+  let
+    mcheck = Array.find (\c -> c.name == cmd.name) catalog
+    scope = case mcheck of
+      Just c -> c.scope
+      Nothing -> defaultScope schema  -- e.g. for the synthetic `show` run
+  minScope <- case cmd.kind, cmd.verdict, mcheck of
+    Check, Counterexample, Just check -> minimizeScope defaultConfig schema check
+    _, _, _ -> pure Nothing
+  pure { command: cmd, witness, scope, minScope }
+
+printMinScope :: ProofRecord -> Aff Unit
+printMinScope p = case p.minScope of
+  Just m | m < p.scope ->
+    Console.log $ "     ↓  " <> p.command.name
+      <> " still SAT at scope " <> show m
+      <> " (original scope " <> show p.scope <> ")"
+  _ -> pure unit
 
 persist
   :: String
   -> ParsedSchema
   -> Int
   -> Int
-  -> Array CommandResult
-  -> Array (Maybe String)
+  -> Array ProofRecord
   -> Aff Unit
-persist sourcePath parsed declaredFKs inferredCount cmds witnesses = do
+persist sourcePath parsed declaredFKs inferredCount proofs = do
   let
-    proofs = Array.zipWith
-      (\c w -> { command: c, witness: w, scope: 8 })
-      cmds
-      witnesses
     record :: AnalysisRecord
     record =
       { name: parsed.declared.name
