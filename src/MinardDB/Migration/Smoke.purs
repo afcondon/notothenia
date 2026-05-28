@@ -18,10 +18,18 @@ import Data.Either (Either(..))
 import Data.Foldable (traverse_)
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
+import Effect.Aff (Aff, launchAff_)
+import Effect.Class (liftEffect)
 import Effect.Class.Console as Console
+import MinardDB.Alloy.Invoke (defaultConfig, runAlloy)
+import MinardDB.Alloy.Receipt (CommandKind(..), CommandResult, Verdict(..), parseReceipt)
 import MinardDB.Migration (Migration(..), MigrationSequence, describe, runSequence)
+import MinardDB.Migration.Alloy (generateTemporal)
 import MinardDB.Migration.Safety (StepReport, describeIssue, runSafetyReport)
 import MinardDB.Schema (Column, FKAction(..), ForeignKey, PGType(..), Schema, Table)
+import Node.Encoding (Encoding(..))
+import Node.FS.Aff as FS
+import Node.Path as Path
 
 ------------------------------------------------------------------------
 -- Initial schema: empty (every sequence starts from scratch)
@@ -105,37 +113,71 @@ unsafeDropColumn = safeSequence <> [ DropColumn "users" "id" ]
 ------------------------------------------------------------------------
 
 main :: Effect Unit
-main = do
-  runOne "SAFE     " safeSequence
+main = launchAff_ do
+  runOne "safe"     safeSequence
   Console.log ""
-  runOne "UNSAFE-T " unsafeDropTable
+  runOne "unsafe-t" unsafeDropTable
   Console.log ""
-  runOne "UNSAFE-C " unsafeDropColumn
+  runOne "unsafe-c" unsafeDropColumn
 
-runOne :: String -> MigrationSequence -> Effect Unit
+-- | Run both passes on a sequence: the deterministic static safety
+-- | check, then the bounded Alloy 6 temporal check. The two should
+-- | agree on whether RI is preserved — if they don't, one of them
+-- | has a bug, and that disagreement is itself useful signal.
+runOne :: String -> MigrationSequence -> Aff Unit
 runOne label ms = case runSequence empty ms of
-  Left err -> do
+  Left err -> liftEffect do
     Console.log $ "[" <> label <> "] PARTIAL  — " <> err.error
     Console.log $ "  " <> show (Array.length err.partialTrace) <> " steps applied before failure"
   Right trace -> do
     let report = runSafetyReport trace
-    Console.log $ "[" <> label <> "] " <> show (Array.length report.steps)
-      <> " steps, " <> show report.totalIntroduced <> " issue(s) introduced"
-    traverse_ printStep (Array.mapWithIndex (\ix step -> { ix, step }) report.steps)
-    case report.finalStanding of
-      [] -> Console.log "  ✓  no standing issues at end of sequence"
-      issues -> do
-        Console.log $ "  ⚠  " <> show (Array.length issues)
-          <> " standing issue(s) at end of sequence:"
-        traverse_ (\i -> Console.log ("       " <> describeIssue i)) issues
+    liftEffect do
+      Console.log $ "[" <> label <> "] " <> show (Array.length report.steps)
+        <> " steps applied"
+      Console.log "  static pass:"
+      Console.log $ "    " <> show report.totalIntroduced <> " issue(s) introduced over the sequence"
+      traverse_ printStep (Array.mapWithIndex (\ix step -> { ix, step }) report.steps)
+      case report.finalStanding of
+        [] -> Console.log "    ✓  no standing issues at end of sequence"
+        issues -> do
+          Console.log $ "    ⚠  " <> show (Array.length issues)
+            <> " standing issue(s) at end of sequence:"
+          traverse_ (\i -> Console.log ("       " <> describeIssue i)) issues
+    runTemporalPass label ms
+
+-- | Generate the Alloy 6 temporal model, hand it to Alloy, parse
+-- | the receipt, and report whether `RIPreserved` holds.
+runTemporalPass :: String -> MigrationSequence -> Aff Unit
+runTemporalPass label ms = case generateTemporal label empty ms of
+  Left err -> liftEffect $ Console.log $ "  temporal pass: gen error — " <> err.error
+  Right modelText -> do
+    let alsPath = "/tmp/migration-" <> label <> ".als"
+    FS.writeTextFile UTF8 alsPath modelText
+    liftEffect $ Console.log $ "  temporal pass (Alloy 6):"
+    liftEffect $ Console.log $ "    wrote " <> alsPath
+    result <- runAlloy defaultConfig alsPath
+    let receiptPath = Path.concat [ "migration-" <> label, "receipt.json" ]
+    receiptText <- FS.readTextFile UTF8 receiptPath
+    case parseReceipt receiptText of
+      Left err -> liftEffect $ Console.log $ "    receipt parse error: " <> err
+      Right cmds -> liftEffect do
+        Console.log $ "    Alloy exit " <> show result.exitCode
+        traverse_ printTemporalVerdict cmds
+
+printTemporalVerdict :: CommandResult -> Effect Unit
+printTemporalVerdict r = Console.log $ "    " <> r.name <> ": " <> show r.verdict
+  <> " — " <> case r.kind, r.verdict of
+    Check, NoCounterexample -> "PROVEN (RI holds across all reachable traces within scope)"
+    Check, Counterexample -> "BROKEN (RI fails at some step — see Alloy trace markdown)"
+    Run, _ -> show r.verdict
 
 printStep :: { ix :: Int, step :: StepReport } -> Effect Unit
 printStep r = do
-  let prefix = "  step " <> show (r.ix + 1) <> ": "
+  let prefix = "    step " <> show (r.ix + 1) <> ": "
   Console.log $ prefix <> describe r.step.migration
   case r.step.introduced of
     [] -> pure unit
-    issues -> traverse_ (\i -> Console.log ("       ⚠  " <> describeIssue i)) issues
+    issues -> traverse_ (\i -> Console.log ("         ⚠  " <> describeIssue i)) issues
   case r.step.resolved of
     [] -> pure unit
-    issues -> traverse_ (\i -> Console.log ("       ✓  resolved: " <> describeIssue i)) issues
+    issues -> traverse_ (\i -> Console.log ("         ✓  resolved: " <> describeIssue i)) issues

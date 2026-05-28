@@ -75,13 +75,24 @@ member it actually is.
   it at column level). All three sequences produce the expected
   output, distinguishing missing-table from missing-column
   dangling FKs.
-- **3b (Alloy 6 temporal model)** — next. Encode the trace as
-  `var sig`s + a transition predicate, with `always RIHolds`
-  as the assertion. Alloy's temporal counterexamples will give
-  us trace-shaped witnesses: not just "RI breaks after step
-  3" but the actual offending row through every step of the
-  sequence. Borrowed from the same QuickCheck-family lens — a
-  temporal counterexample is just a multi-step shrink target.
+- **3b (Alloy 6 temporal model)** — done.
+  `MinardDB.Migration.Alloy.generateTemporal` emits an Alloy 6
+  model where every table/column/FK that *ever* appears across
+  the trace becomes a static one-sig, and `var sig
+  Active{Table,Column,FK}` track current membership. One
+  transition predicate per migration kind, plus a `stutter`
+  for time after the final step. The trace fact chains the
+  migrations with nested `after`s; the tail `after^n always
+  stutter` pins the trace stable. The assertion is `always
+  RIHolds` (every active FK targets an active table + active
+  columns); `check RIPreserved for 5 but 1..15 steps`. The
+  smoke test runs both passes on each fixture and reports
+  them side-by-side. All three fixtures agree: SAFE → Alloy
+  UNSAT (PROVEN), UNSAFE-T and UNSAFE-C → Alloy SAT
+  (BROKEN). The cross-check is the deliverable: when both
+  the deterministic walker and bounded model finder agree,
+  we have meaningful confidence; if they ever disagree, the
+  disagreement is itself a useful signal.
 - **3c (SQL parsing)** — defer. Hand-coded migrations are
   sufficient to nail the semantics; a `parseSql` pass is
   mechanical and lands once 3a/3b are stable.
