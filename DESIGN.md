@@ -59,6 +59,35 @@ member it actually is.
   retained as a learning artifact until the Hylograph-backed
   rewrite lands.
 
+**Phase 3 — in progress (migration verification).**
+
+- **3a (groundwork: migration model + static safety)** — done.
+  `MinardDB.Migration` defines the `Migration` ADT (CreateTable,
+  DropTable, AddColumn, DropColumn, AddForeignKey,
+  DropForeignKey) and `applyMigration :: Migration -> Schema ->
+  Either String Schema`. `runSequence` accumulates a trace of
+  `{ migration, before, after }`. `MinardDB.Migration.Safety`
+  scans each step for `MissingTargetTable` / `MissingTargetColumn`
+  issues and reports them as *introduced* / *resolved* /
+  *standing* per step. Smoke test (`MinardDB.Migration.Smoke`)
+  covers a safe build-up plus two unsafe variants
+  (DROP TABLE breaks the FK at table level; DROP COLUMN breaks
+  it at column level). All three sequences produce the expected
+  output, distinguishing missing-table from missing-column
+  dangling FKs.
+- **3b (Alloy 6 temporal model)** — next. Encode the trace as
+  `var sig`s + a transition predicate, with `always RIHolds`
+  as the assertion. Alloy's temporal counterexamples will give
+  us trace-shaped witnesses: not just "RI breaks after step
+  3" but the actual offending row through every step of the
+  sequence. Borrowed from the same QuickCheck-family lens — a
+  temporal counterexample is just a multi-step shrink target.
+- **3c (SQL parsing)** — defer. Hand-coded migrations are
+  sufficient to nail the semantics; a `parseSql` pass is
+  mechanical and lands once 3a/3b are stable.
+- **3d (migration timeline UI)** — defer until the safety
+  pass has a real use case in the wild.
+
 **Note: Data Model section below has drifted.** The plan originally
 described a shared `minard_db_*` namespace inside Minard's DuckDB.
 Implementation diverged: notothenia owns `database/notothenia.duckdb`
