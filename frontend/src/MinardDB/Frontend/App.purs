@@ -217,6 +217,7 @@ renderDetail d =
     , noDeclaredFKsExplainer d
     , inferredFKsSection d.inferredFKs
     , cycleExplainer d
+    , bcnfExplainer d
     , proofsSection d.proofs
     ]
 
@@ -398,6 +399,175 @@ extractWitnessTable :: String -> Maybe String
 extractWitnessTable atom =
   case Array.head (String.split (String.Pattern "$") atom) of
     Just t | t /= "" -> Just t
+    _ -> Nothing
+
+--------------------------------------------------------------------------
+-- BCNF explainer
+--------------------------------------------------------------------------
+
+type BCNFFinding =
+  { checkName :: String     -- e.g. "BCNF_addresses_zip__city"
+  , witnessTable :: String  -- e.g. "addresses"
+  , determinant :: String   -- e.g. "zip"  (joined with ", " if multi-col)
+  , dependent :: String     -- e.g. "city" (joined with ", " if multi-col)
+  }
+
+bcnfExplainer :: forall a. Detail -> HH.HTML a Action
+bcnfExplainer d = case findBCNFProof d of
+  Nothing -> HH.text ""
+  Just f ->
+    HH.section [ HP.class_ (HH.ClassName "explainer") ]
+      [ HH.h3_
+          [ HH.text "Why does the same address have two cities? (BCNF)" ]
+      , HH.p_
+          [ HH.text "The proof "
+          , HH.code_ [ HH.text f.checkName ]
+          , HH.text " found two distinct rows of "
+          , HH.code_ [ HH.text f.witnessTable ]
+          , HH.text " that agree on "
+          , HH.code_ [ HH.text f.determinant ]
+          , HH.text " but disagree on "
+          , HH.code_ [ HH.text f.dependent ]
+          , HH.text ". The schema permits this because "
+          , HH.code_ [ HH.text f.determinant ]
+          , HH.text " isn't a key — there's no PK or UNIQUE constraint forcing values to be distinct."
+          ]
+      , HH.p_
+          [ HH.text "But the table claims "
+          , HH.code_ [ HH.text f.determinant ]
+          , HH.text " "
+          , HH.em_ [ HH.text "determines" ]
+          , HH.text " "
+          , HH.code_ [ HH.text f.dependent ]
+          , HH.text " — i.e. that knowing the first tells you the second. If the schema permits two different "
+          , HH.code_ [ HH.text f.dependent ]
+          , HH.text " values for the same "
+          , HH.code_ [ HH.text f.determinant ]
+          , HH.text ", that claim isn't enforceable. This is a "
+          , HH.strong_ [ HH.text "BCNF violation" ]
+          , HH.text " (Boyce–Codd Normal Form): every non-trivial functional dependency must have a "
+          , HH.em_ [ HH.text "superkey" ]
+          , HH.text " as its determinant, otherwise the schema admits inconsistent data."
+          ]
+      , HH.h4_ [ HH.text "What this looks like in real data" ]
+      , HH.p_
+          [ HH.text "Two rows that "
+          , HH.em_ [ HH.text "should" ]
+          , HH.text " agree but don't:" ]
+      , HH.pre_
+          [ HH.code_
+              [ HH.text ("INSERT INTO " <> f.witnessTable <> " VALUES (1, '02139', 'Cambridge', '...');\n")
+              , HH.text ("INSERT INTO " <> f.witnessTable <> " VALUES (2, '02139', 'Somerville', '...');\n")
+              , HH.text "-- both rows valid by the schema; both rows wrong in reality"
+              ]
+          ]
+      , HH.h4_ [ HH.text "Why this matters" ]
+      , HH.ul_
+          [ HH.li_
+              [ HH.strong_ [ HH.text "Redundancy." ]
+              , HH.text " Every row repeats the "
+              , HH.code_ [ HH.text f.dependent ]
+              , HH.text " value. Storage is fine; the problem is "
+              , HH.em_ [ HH.text "update anomalies" ]
+              , HH.text "."
+              ]
+          , HH.li_
+              [ HH.strong_ [ HH.text "Update anomaly." ]
+              , HH.text " When the "
+              , HH.code_ [ HH.text f.dependent ]
+              , HH.text " for a given "
+              , HH.code_ [ HH.text f.determinant ]
+              , HH.text " changes, you have to update every row. Miss one and the database now disagrees with itself."
+              ]
+          , HH.li_
+              [ HH.strong_ [ HH.text "Insertion anomaly." ]
+              , HH.text " You can't record a "
+              , HH.code_ [ HH.text f.determinant ]
+              , HH.text "/"
+              , HH.code_ [ HH.text f.dependent ]
+              , HH.text " pair until a row of "
+              , HH.code_ [ HH.text f.witnessTable ]
+              , HH.text " needs it — the fact has nowhere else to live."
+              ]
+          , HH.li_
+              [ HH.strong_ [ HH.text "Deletion anomaly." ]
+              , HH.text " Deleting the last row referencing a particular "
+              , HH.code_ [ HH.text f.determinant ]
+              , HH.text " forgets the "
+              , HH.code_ [ HH.text f.dependent ]
+              , HH.text " entirely."
+              ]
+          ]
+      , HH.h4_ [ HH.text "How to fix" ]
+      , HH.p_
+          [ HH.text "The textbook fix: split the table so the "
+          , HH.code_ [ HH.text f.determinant ]
+          , HH.text " → "
+          , HH.code_ [ HH.text f.dependent ]
+          , HH.text " relationship lives in its own table where "
+          , HH.code_ [ HH.text f.determinant ]
+          , HH.text " is the primary key." ]
+      , HH.pre_
+          [ HH.code_
+              [ HH.text ("-- Move the fact out:\n")
+              , HH.text ("CREATE TABLE " <> f.determinant <> "_lookup (\n")
+              , HH.text ("  " <> f.determinant <> " TEXT PRIMARY KEY,\n")
+              , HH.text ("  " <> f.dependent <> " TEXT NOT NULL\n")
+              , HH.text (");\n\n")
+              , HH.text ("-- " <> f.witnessTable <> " keeps the FK, drops the redundant column:\n")
+              , HH.text ("ALTER TABLE " <> f.witnessTable <> " DROP COLUMN " <> f.dependent <> ";\n")
+              , HH.text ("ALTER TABLE " <> f.witnessTable <> " ADD FOREIGN KEY (" <> f.determinant <> ")\n")
+              , HH.text ("  REFERENCES " <> f.determinant <> "_lookup(" <> f.determinant <> ");")
+              ]
+          ]
+      , HH.p_
+          [ HH.text "Now there is exactly one row per "
+          , HH.code_ [ HH.text f.determinant ]
+          , HH.text ", the relationship is enforceable by the PK on the lookup table, and BCNF holds."
+          ]
+      ]
+
+-- | Detect a BCNF SAT counterexample, extract the offending FD from the
+-- | check name (format: `BCNF_<table>_<det_cols>__<dep_cols>`), and pull
+-- | the witness table from the witness atom. The double-underscore
+-- | separates the determinant from the dependent.
+findBCNFProof :: Detail -> Maybe BCNFFinding
+findBCNFProof d = do
+  proof <- Array.find isBCNFViolation d.proofs
+  witness <- proof.witness
+  table <- extractWitnessTable witness
+  { determinant, dependent } <- parseBCNFCheckName proof.commandName
+  pure
+    { checkName: proof.commandName
+    , witnessTable: table
+    , determinant
+    , dependent
+    }
+  where
+    isBCNFViolation p =
+      case String.stripPrefix (String.Pattern "BCNF_") p.commandName of
+        Just _ -> p.verdict == "SAT"
+        Nothing -> false
+
+-- | Parse a check name like `BCNF_addresses_zip__city` into determinant
+-- | and dependent column lists. The `__` (double-underscore) splits the
+-- | two; the table-name boundary inside the first half is recovered
+-- | by best-effort heuristic (split off the first underscore-separated
+-- | segment as the table).
+parseBCNFCheckName
+  :: String -> Maybe { determinant :: String, dependent :: String }
+parseBCNFCheckName name = do
+  rest <- String.stripPrefix (String.Pattern "BCNF_") name
+  let parts = String.split (String.Pattern "__") rest
+  case parts of
+    [ tableAndDet, dep ] -> do
+      -- table_det1_det2_...  →  drop the first segment (table), join rest with ", "
+      let segs = String.split (String.Pattern "_") tableAndDet
+      detSegs <- Array.tail segs
+      Just
+        { determinant: String.joinWith ", " detSegs
+        , dependent: String.joinWith ", " (String.split (String.Pattern "_") dep)
+        }
     _ -> Nothing
 
 inferredFKsSection :: forall a. Array InferredFK -> HH.HTML a Action
