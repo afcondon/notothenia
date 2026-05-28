@@ -114,15 +114,46 @@ renderUniqueFact t uc =
       <> "  all disj a, b: " <> sig <> " | " <> body <> "\n"
       <> "}"
 
--- | Default commands: check FK consistency, run a satisfiability check.
+-- | Default commands: run-show (any valid instance) + acyclicity check.
 defaultCommands :: Schema -> String
 defaultCommands schema =
   let
     n = Array.length schema.tables
     scope = max 3 (min 8 (n + 2))
+    scopeStr = show scope
   in
-    "run show for " <> show scope <> "\n"
-      <> "pred show {}"
+    intercalate "\n\n"
+      [ "pred show {}"
+      , "run show for " <> scopeStr
+      , noFKCycleAssert schema scopeStr
+      ]
+
+-- | Assert: no atom is in its own transitive closure across the union
+-- | of all FK fields. UNSAT means "no counterexample within scope"
+-- | i.e. the property holds. SAT means Alloy found a cycle.
+noFKCycleAssert :: Schema -> String -> String
+noFKCycleAssert schema scopeStr =
+  let
+    fkFieldNames = collectFKFieldNames schema
+  in
+    if null fkFieldNames then
+      "// (no FK fields; acyclicity trivially holds)"
+    else
+      let
+        unioned = intercalate " + " fkFieldNames
+      in
+        "assert NoFKCycle {\n"
+          <> "  no a: univ | a in a.^(" <> unioned <> ")\n"
+          <> "}\n"
+          <> "check NoFKCycle for " <> scopeStr
+
+-- | Collect the field names used to render each FK (first column of the FK).
+collectFKFieldNames :: Schema -> Array String
+collectFKFieldNames schema =
+  schema.tables
+    # Array.concatMap _.foreignKeys
+    # Array.mapMaybe (\fk -> map fieldName (Array.head fk.columns))
+    # nub
 
 -- Naming helpers -------------------------------------------------------------
 

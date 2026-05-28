@@ -70,13 +70,62 @@ smokeSchema =
       ]
   }
 
+-- | A schema with a deliberate FK cycle: A -> B -> A.
+-- | Alloy should report the NoFKCycle check as SAT (counterexample found).
+cyclicSchema :: Schema
+cyclicSchema =
+  { name: "cyclic-fixture"
+  , tables:
+      [ { name: "thing_a"
+        , schemaName: "main"
+        , columns:
+            [ { name: "id", dataType: PGInt, nullable: false, defaultExpr: Nothing }
+            , { name: "b_ref", dataType: PGInt, nullable: false, defaultExpr: Nothing }
+            ]
+        , primaryKey: [ "id" ]
+        , foreignKeys:
+            [ { columns: [ "b_ref" ]
+              , refTable: "thing_b"
+              , refColumns: [ "id" ]
+              , onDelete: NoAction
+              , onUpdate: NoAction
+              }
+            ]
+        , uniqueConstraints: []
+        }
+      , { name: "thing_b"
+        , schemaName: "main"
+        , columns:
+            [ { name: "id", dataType: PGInt, nullable: false, defaultExpr: Nothing }
+            , { name: "a_ref", dataType: PGInt, nullable: false, defaultExpr: Nothing }
+            ]
+        , primaryKey: [ "id" ]
+        , foreignKeys:
+            [ { columns: [ "a_ref" ]
+              , refTable: "thing_a"
+              , refColumns: [ "id" ]
+              , onDelete: NoAction
+              , onUpdate: NoAction
+              }
+            ]
+        , uniqueConstraints: []
+        }
+      ]
+  }
+
 main :: Effect Unit
 main = do
-  let alsText = generate smokeSchema
-  Console.log "=== Generated Alloy model ==="
-  Console.log alsText
+  Console.log "=== Smoke 1: well-formed tree (projects → snapshots → packages) ==="
+  let okAls = generate smokeSchema
+  Console.log okAls
+  FS.writeTextFile UTF8 "/tmp/minard-smoke-ok.als" okAls
   Console.log ""
-  Console.log "=== Writing to /tmp/minard-smoke.als ==="
-  FS.writeTextFile UTF8 "/tmp/minard-smoke.als" alsText
-  Console.log "Done. Run with:"
-  Console.log "  /opt/homebrew/opt/openjdk/bin/java -jar vendor/alloy.jar exec /tmp/minard-smoke.als"
+  Console.log "=== Smoke 2: deliberate cycle (thing_a ↔ thing_b) ==="
+  let badAls = generate cyclicSchema
+  Console.log badAls
+  FS.writeTextFile UTF8 "/tmp/minard-smoke-bad.als" badAls
+  Console.log ""
+  Console.log "Run both with:"
+  Console.log "  java -jar vendor/alloy.jar exec /tmp/minard-smoke-ok.als"
+  Console.log "  java -jar vendor/alloy.jar exec /tmp/minard-smoke-bad.als"
+  Console.log "Expect NoFKCycle: UNSAT (ok), SAT (bad)."

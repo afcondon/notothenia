@@ -4,7 +4,7 @@ node_modules/
 spago.lock
 
 # Alloy outputs go to <source-stem>/ next to the .als file
-minard-smoke/
+minard-smoke*/
 vendor/smoke/
 
 # Vendored binaries — installed via the README
