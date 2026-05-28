@@ -1,0 +1,25 @@
+package:
+  name: minard-db
+  description: "Minard-DB — schema cartography with Alloy-backed proofs"
+  dependencies:
+    - aff
+    - arrays
+    - console
+    - effect
+    - either
+    - foldable-traversable
+    - maybe
+    - node-buffer
+    - node-child-process
+    - node-fs
+    - node-path
+    - prelude
+    - strings
+    - tuples
+  test:
+    main: Test.Main
+    dependencies: []
+workspace:
+  packageSet:
+    registry: 73.3.0
+  extraPackages: {}

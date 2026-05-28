@@ -1,0 +1,10 @@
+{
+  "name": "minard-db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "spago build",
+    "smoke": "spago run -p minard-db --main MinardDB.Smoke"
+  }
+}
