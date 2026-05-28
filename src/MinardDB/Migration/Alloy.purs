@@ -177,11 +177,12 @@ render name cat initial trace = joinWith "\n\n"
   , renderTableSigs cat
   , renderColumnSigs cat
   , renderFKSigs cat
+  , renderRowSig
   , renderVarSigs
   , renderInit initial cat
   , renderTransitions
   , renderTrace cat trace
-  , renderRIInvariant
+  , renderRIInvariants
   ]
 
 header :: String -> String
@@ -231,12 +232,36 @@ renderFKSigs cat =
     joinCols [] = "none"
     joinCols xs = joinWith " + " xs
 
+renderRowSig :: String
+renderRowSig = joinWith "\n"
+  [ "// ── ROWS ────────────────────────────────────────────────────────"
+  , "// Rows belong to a table. A row may optionally reference another"
+  , "// row via a specific FK; consistency facts pin the relations down."
+  , "// Alloy chooses how many rows exist (within scope) and how they"
+  , "// reference each other -- making row-level RI an explorable axis."
+  , "sig Row {"
+  , "  ofTable:  one Table,"
+  , "  fkVia:    lone FK,"
+  , "  fkTarget: lone Row"
+  , "}"
+  , ""
+  , "fact rowFKConsistency {"
+  , "  // fkVia and fkTarget either both present or both absent."
+  , "  all r: Row | some r.fkVia iff some r.fkTarget"
+  , "  // The fkVia FK's source table matches the row's table."
+  , "  all r: Row | some r.fkVia implies r.fkVia.srcTable = r.ofTable"
+  , "  // The fkTarget's table matches the fkVia FK's target table."
+  , "  all r: Row | some r.fkVia implies r.fkTarget.ofTable = r.fkVia.tgtTable"
+  , "}"
+  ]
+
 renderVarSigs :: String
 renderVarSigs =
   "// ── TIME-VARYING MEMBERSHIP ─────────────────────────────────────\n"
     <> "var sig ActiveTable  in Table  {}\n"
     <> "var sig ActiveColumn in Column {}\n"
-    <> "var sig ActiveFK     in FK     {}"
+    <> "var sig ActiveFK     in FK     {}\n"
+    <> "var sig ActiveRow    in Row    {}"
 
 renderInit :: Schema -> Catalog -> String
 renderInit initial cat =
@@ -247,12 +272,15 @@ renderInit initial cat =
   where
     renderInitBody s _ =
       if Array.null s.tables then
-        "  no ActiveTable\n  no ActiveColumn\n  no ActiveFK"
+        "  no ActiveTable\n  no ActiveColumn\n  no ActiveFK\n  no ActiveRow"
       else
         "  // initial schema non-empty — populate from supplied state\n"
           <> "  ActiveTable  = " <> initTableSet cat s <> "\n"
           <> "  ActiveColumn = " <> initColumnSet cat s <> "\n"
-          <> "  ActiveFK     = " <> initFKSet cat s
+          <> "  ActiveFK     = " <> initFKSet cat s <> "\n"
+          <> "  // Initial row population is unconstrained — Alloy chooses\n"
+          <> "  // any valid set restricted to active-table rows.\n"
+          <> "  ActiveRow in ofTable.ActiveTable"
 
     initTableSet cat' s =
       let
@@ -280,11 +308,16 @@ renderTransitions :: String
 renderTransitions =
   joinWith "\n"
     [ "// ── TRANSITION PREDICATES ───────────────────────────────────────"
+    , "// Schema migrations leave rows unchanged EXCEPT for dropTable,"
+    , "// which cascade-removes the dropped table's rows. Source rows in"
+    , "// other tables that referenced them now dangle — the row-level"
+    , "// RI violation we want surfaced."
     , "pred createTable[t: Table, cols: set Column] {"
     , "  t not in ActiveTable"
     , "  ActiveTable'  = ActiveTable + t"
     , "  ActiveColumn' = ActiveColumn + cols"
     , "  ActiveFK'     = ActiveFK"
+    , "  ActiveRow'    = ActiveRow"
     , "}"
     , ""
     , "pred dropTable[t: Table] {"
@@ -292,6 +325,7 @@ renderTransitions =
     , "  ActiveTable'  = ActiveTable - t"
     , "  ActiveColumn' = ActiveColumn - ofTable.t"
     , "  ActiveFK'     = ActiveFK"
+    , "  ActiveRow'    = ActiveRow - ofTable.t"
     , "}"
     , ""
     , "pred addColumn[c: Column] {"
@@ -300,6 +334,7 @@ renderTransitions =
     , "  ActiveTable'  = ActiveTable"
     , "  ActiveColumn' = ActiveColumn + c"
     , "  ActiveFK'     = ActiveFK"
+    , "  ActiveRow'    = ActiveRow"
     , "}"
     , ""
     , "pred dropColumn[c: Column] {"
@@ -307,6 +342,7 @@ renderTransitions =
     , "  ActiveTable'  = ActiveTable"
     , "  ActiveColumn' = ActiveColumn - c"
     , "  ActiveFK'     = ActiveFK"
+    , "  ActiveRow'    = ActiveRow"
     , "}"
     , ""
     , "pred addFK[f: FK] {"
@@ -314,6 +350,7 @@ renderTransitions =
     , "  ActiveTable'  = ActiveTable"
     , "  ActiveColumn' = ActiveColumn"
     , "  ActiveFK'     = ActiveFK + f"
+    , "  ActiveRow'    = ActiveRow"
     , "}"
     , ""
     , "pred dropFK[f: FK] {"
@@ -321,33 +358,79 @@ renderTransitions =
     , "  ActiveTable'  = ActiveTable"
     , "  ActiveColumn' = ActiveColumn"
     , "  ActiveFK'     = ActiveFK - f"
+    , "  ActiveRow'    = ActiveRow"
+    , "}"
+    , ""
+    , "// `populate` lets new rows enter ActiveRow. Alloy picks any"
+    , "// row(s) whose tables are active AND whose fkTarget is also"
+    , "// added when fkVia is set."
+    , "//"
+    , "// We require fkTarget presence whenever fkVia is set, NOT only"
+    , "// when the FK is currently active. The weaker version ('fkVia"
+    , "// in ActiveFK implies fkTarget in ActiveRow') admits row"
+    , "// populations whose FK constraints aren't currently enforced;"
+    , "// a subsequent addFK then *retroactively* breaks RI, surfacing"
+    , "// as a spurious counterexample for the SAFE sequence too."
+    , "// Treating fkVia as a row-shape commitment matches the real-DB"
+    , "// intuition that a row referencing another row keeps doing so"
+    , "// regardless of whether the FK is currently enforced."
+    , "pred populate {"
+    , "  ActiveTable'  = ActiveTable"
+    , "  ActiveColumn' = ActiveColumn"
+    , "  ActiveFK'     = ActiveFK"
+    , "  ActiveRow' in ofTable.ActiveTable"
+    , "  all r: ActiveRow' | some r.fkVia implies r.fkTarget in ActiveRow'"
     , "}"
     , ""
     , "pred stutter {"
     , "  ActiveTable'  = ActiveTable"
     , "  ActiveColumn' = ActiveColumn"
     , "  ActiveFK'     = ActiveFK"
+    , "  ActiveRow'    = ActiveRow"
     , "}"
     ]
 
--- | The trace fact: each migration step appears as `after^n predicate`,
--- | then a tail-stutter pins the system stable past the final step.
+-- | The trace fact interleaves each migration with a `populate` step.
+-- | For an N-step migration sequence, the trace has 2N+1 positions:
+-- |
+-- |   position 0       — migration[0]
+-- |   position 1       — populate
+-- |   position 2       — migration[1]
+-- |   position 3       — populate
+-- |   ...
+-- |   position 2N-2    — migration[N-1]
+-- |   position 2N-1    — populate
+-- |   position 2N      — always stutter
+-- |
+-- | Why interleave? `populate` is what gives Alloy a freedom to introduce
+-- | rows. With populate only at the very end, by the time a destructive
+-- | migration has already fired the target rows can't exist and the row
+-- | RI assertion is trivially satisfied. With populate before each
+-- | destructive step, Alloy can place a row population that the next
+-- | migration's cascade renders invalid — that's the counterexample
+-- | the row-level assertion exists to surface.
 renderTrace :: Catalog -> Array TraceStep -> String
 renderTrace cat trace =
   let
-    rendered = Array.mapWithIndex (renderStep cat) trace
     nSteps = Array.length trace
-    tail = afterChain nSteps <> "always stutter"
+    migrationLines = Array.mapWithIndex (renderMigStep cat) trace
+    populateLines = Array.mapWithIndex (\ix _ -> renderPopulate ix) trace
+    interleaved = Array.concat (Array.zipWith (\m p -> [ m, p ]) migrationLines populateLines)
+    tail = afterChain (2 * nSteps) <> "always stutter"
   in
     "// ── TRACE FACT ──────────────────────────────────────────────────\n"
       <> "fact trace {\n"
-      <> joinWith "\n" (map indent rendered)
+      <> joinWith "\n" (map indent interleaved)
       <> "\n" <> indent tail
       <> "\n}"
   where
     indent s = "  " <> s
 
-    renderStep cat' ix step = afterChain ix <> renderMigration cat' step.migration
+    renderMigStep cat' ix step =
+      afterChain (2 * ix) <> renderMigration cat' step.migration
+
+    renderPopulate ix =
+      afterChain (2 * ix + 1) <> "populate"
 
 afterChain :: Int -> String
 afterChain n
@@ -374,19 +457,37 @@ renderMigration cat = case _ of
   DropForeignKey tName cols ->
     "dropFK[" <> lookupFKSig cat tName cols <> "]"
 
-renderRIInvariant :: String
-renderRIInvariant =
-  joinWith "\n"
-    [ "// ── RI INVARIANT ────────────────────────────────────────────────"
-    , "pred RIHolds {"
-    , "  all f: ActiveFK |"
-    , "    f.tgtTable in ActiveTable"
-    , "    and f.tgtCols in ActiveColumn"
-    , "}"
-    , ""
-    , "assert RIPreserved { always RIHolds }"
-    , "check RIPreserved for 5 but 1..15 steps"
-    ]
+renderRIInvariants :: String
+renderRIInvariants = joinWith "\n"
+  [ "// ── RI INVARIANTS ───────────────────────────────────────────────"
+  , "// Split into schema-level and row-level so the verdicts diagnose"
+  , "// which layer breaks. DROP TABLE on the target of an FK breaks"
+  , "// both: the table is gone (so the FK schema-level dangles) AND"
+  , "// the rows that referenced it are cascade-removed (so source"
+  , "// rows in other tables are orphaned). DROP COLUMN of an FK"
+  , "// target column breaks only schema-level — rows don't track"
+  , "// which columns store their values. That's the fault-localization"
+  , "// payoff: the two verdicts together describe whether the fix is"
+  , "// a column-level rewire or a data-loss event."
+  , "pred RISchemaLevel {"
+  , "  all f: ActiveFK |"
+  , "    f.tgtTable in ActiveTable"
+  , "    and f.tgtCols in ActiveColumn"
+  , "}"
+  , ""
+  , "// See `populate` for why `some r.fkVia` (not `r.fkVia in ActiveFK`)"
+  , "// is the antecedent: a row whose FK target dangles is broken"
+  , "// whether or not the FK constraint is currently enforced."
+  , "pred RIRowLevel {"
+  , "  all r: ActiveRow | r.ofTable in ActiveTable"
+  , "  all r: ActiveRow | some r.fkVia implies r.fkTarget in ActiveRow"
+  , "}"
+  , ""
+  , "assert SchemaRIPreserved { always RISchemaLevel }"
+  , "assert RowRIPreserved    { always RIRowLevel }"
+  , "check SchemaRIPreserved for 5 but 1..20 steps"
+  , "check RowRIPreserved    for 5 but 1..20 steps"
+  ]
 
 ------------------------------------------------------------------------
 -- Lookup helpers

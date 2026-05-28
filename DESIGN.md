@@ -93,10 +93,40 @@ member it actually is.
   the deterministic walker and bounded model finder agree,
   we have meaningful confidence; if they ever disagree, the
   disagreement is itself a useful signal.
-- **3c (SQL parsing)** — defer. Hand-coded migrations are
+- **3c (row-level model + fault localization)** — done.
+  Generated model adds a `Row` sig with `ofTable`, `lone fkVia`,
+  `lone fkTarget` (plus consistency facts pinning the relations
+  to the schema), a `var sig ActiveRow`, a `populate` transition
+  that lets Alloy introduce row populations between migrations,
+  and cascade semantics on `dropTable`. The assertion splits in
+  two: `SchemaRIPreserved` (FK targets a present table/column)
+  and `RowRIPreserved` (row's fkTarget is in ActiveRow when
+  fkVia is set). Verdicts:
+
+    SAFE     → both PROVEN
+    UNSAFE-T → both BROKEN
+    UNSAFE-C → schema BROKEN, rows PROVEN
+
+  The split is the fault-localization payoff. Row-level PROVEN
+  on a schema-BROKEN sequence says "the data is fine; this is a
+  column-rewire problem, not a data-loss event". Row-level
+  BROKEN on a schema-BROKEN sequence says "the cascade will
+  orphan rows — fix-up needs migration logic, not just DDL".
+
+  The non-obvious part was getting `populate` to commit rows to
+  their fkTarget *unconditionally* on `some fkVia` rather than
+  conditionally on `fkVia in ActiveFK`. The weaker antecedent
+  let Alloy pre-load rows whose constraint wasn't currently
+  enforced, then a later `addFK` retroactively breaks RI on the
+  *populate* step rather than on a subsequent destructive
+  migration — a spurious counterexample. Treating fkVia as a
+  row-shape commitment that survives FK-toggling matches the
+  real-DB intuition (a row referencing another row doesn't
+  forget about it just because the FK constraint is dropped).
+- **3d (SQL parsing)** — defer. Hand-coded migrations are
   sufficient to nail the semantics; a `parseSql` pass is
-  mechanical and lands once 3a/3b are stable.
-- **3d (migration timeline UI)** — defer until the safety
+  mechanical and lands once 3a/3b/3c are stable.
+- **3e (migration timeline UI)** — defer until the safety
   pass has a real use case in the wild.
 
 **Note: Data Model section below has drifted.** The plan originally
