@@ -1,0 +1,26 @@
+package:
+  name: minard-db-frontend
+  description: "Halogen UI for Notothenia (Minard-DB) reports."
+  bundle:
+    module: MinardDB.Frontend.Main
+    outfile: public/bundle.js
+    platform: browser
+  dependencies:
+    - aff
+    - affjax
+    - affjax-web
+    - argonaut-core
+    - arrays
+    - console
+    - effect
+    - either
+    - foldable-traversable
+    - foreign-object
+    - halogen
+    - maybe
+    - prelude
+    - strings
+    - transformers
+    - tuples
+    - web-dom
+    - web-html

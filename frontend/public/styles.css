@@ -1,0 +1,256 @@
+/* Notothenia / Minard-DB — Swiss/International typographic style */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 3rem 2rem 4rem;
+}
+
+/* Header --------------------------------------------------------------- */
+
+.site-header {
+  border-bottom: 3px solid #1a1a1a;
+  padding-bottom: 1rem;
+  margin-bottom: 3rem;
+}
+
+.site-header h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  color: #666;
+  font-size: 0.95rem;
+  margin-top: 0.25rem;
+}
+
+/* Section headings ----------------------------------------------------- */
+
+h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1.25rem;
+}
+
+h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  margin-top: 1.75rem;
+  color: #333;
+}
+
+/* List view ------------------------------------------------------------ */
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
+.analysis-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 1.25rem;
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.analysis-card:hover {
+  border-color: #1a1a1a;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.analysis-card h3 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+  color: #1a1a1a;
+}
+
+.source-path {
+  font-size: 0.78rem;
+  color: #666;
+  margin-bottom: 0.75rem;
+  word-break: break-all;
+}
+
+.source-path code {
+  background: transparent;
+  padding: 0;
+}
+
+.timestamp {
+  font-size: 0.75rem;
+  color: #999;
+  margin-top: 0.5rem;
+}
+
+/* Stats ---------------------------------------------------------------- */
+
+.stats, .stats-row {
+  display: flex;
+  gap: 1.5rem;
+  margin: 1rem 0;
+}
+
+.stats-row {
+  gap: 2.5rem;
+  margin: 1.5rem 0 2rem;
+  padding: 1rem 0;
+  border-top: 1px solid #e0e0e0;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.stat-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.stats-row .stat-value {
+  font-size: 2rem;
+}
+
+.stat-label {
+  font-size: 0.72rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 0.15rem;
+}
+
+/* Detail view ---------------------------------------------------------- */
+
+.breadcrumb {
+  margin-bottom: 1rem;
+}
+
+.breadcrumb a {
+  color: #666;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.breadcrumb a:hover { color: #1a1a1a; }
+
+.warning {
+  background: #fff8e1;
+  border-left: 4px solid #f57f17;
+  padding: 1.25rem 1.5rem;
+  margin: 2rem 0;
+  border-radius: 0 4px 4px 0;
+}
+
+.warning h3 {
+  margin-top: 0;
+  color: #6b3a0e;
+}
+
+.warning p {
+  margin: 0.5rem 0 0 0;
+  color: #4a2a08;
+  font-size: 0.92rem;
+}
+
+/* Tables --------------------------------------------------------------- */
+
+.fk-section, .proofs-section {
+  margin-top: 2rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.75rem;
+  font-size: 0.88rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.55rem 0.85rem;
+  border-bottom: 1px solid #eee;
+}
+
+th {
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #666;
+  border-bottom: 2px solid #ddd;
+  background: #f5f5f5;
+}
+
+tr:hover td { background: #fafafa; }
+
+td code, .source-path code {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.83em;
+  background: #f0f0f0;
+  padding: 0.1em 0.4em;
+  border-radius: 3px;
+}
+
+/* Proof verdict colours ------------------------------------------------ */
+
+.proof-row.ok .verdict {
+  color: #2e7d32;
+  font-weight: 600;
+}
+
+.proof-row.broken .verdict {
+  color: #c62828;
+  font-weight: 600;
+}
+
+.proof-row.neutral .verdict {
+  color: #666;
+}
+
+/* States --------------------------------------------------------------- */
+
+.loading, .empty, .error {
+  padding: 2rem;
+  text-align: center;
+  color: #666;
+  font-size: 0.95rem;
+}
+
+.error {
+  color: #c62828;
+  background: #ffebee;
+  border-radius: 4px;
+}
+
+/* Footer --------------------------------------------------------------- */
+
+.site-footer {
+  margin-top: 4rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #ddd;
+  text-align: center;
+  color: #999;
+  font-size: 0.85rem;
+  font-style: italic;
+}

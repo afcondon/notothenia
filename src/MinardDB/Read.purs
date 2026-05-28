@@ -8,6 +8,7 @@ import Data.Argonaut.Parser (jsonParser)
 import Data.Either (Either(..))
 import Data.Int as Int
 import Data.Maybe (Maybe(..))
+import Data.String as String
 import Data.Traversable (traverse)
 import Effect.Aff (Aff, makeAff, nonCanceler)
 import Effect.Ref as Ref
@@ -178,12 +179,16 @@ note msg = case _ of
   Just x -> Right x
   Nothing -> Left msg
 
--- | Run a SELECT and parse stdout as JSON.
+-- | Run a SELECT and parse stdout as JSON. Empty stdout (no result rows)
+-- | parses as an empty JSON array.
 runQuery :: ReadConfig -> String -> Aff (Either String Json)
 runQuery cfg sql = do
   result <- spawnDuckDB cfg sql
   if result.exitCode == 0 then
-    pure $ jsonParser result.stdout
+    let trimmed = String.trim result.stdout
+    in if trimmed == ""
+      then pure $ Right (J.fromArray [])
+      else pure $ jsonParser trimmed
   else
     pure $ Left $ "duckdb failed: " <> result.stderr
 
