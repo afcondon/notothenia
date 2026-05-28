@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""Introspect a DuckDB file's main schema into a Schema-AST-shaped JSON.
+
+Usage:
+    python3 introspect-duckdb.py /path/to/file.duckdb [output.json]
+
+Reads the database in read-only mode. Output JSON matches the shape
+consumed by MinardDB.Schema.* via MinardDB.Schema.JSON.
+
+The DuckDB CLI must be on PATH.
+"""
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+def duckdb_json(db_path: str, sql: str) -> list:
+    """Run a query and parse the JSON output. Read-only mode."""
+    result = subprocess.run(
+        ["duckdb", "-readonly", "-json", db_path, sql],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"duckdb failed: {result.stderr}")
+    if not result.stdout.strip():
+        return []
+    return json.loads(result.stdout)
+
+
+DUCKDB_TO_PG_TYPE = {
+    "INTEGER": "PGInt",
+    "BIGINT": "PGBigInt",
+    "VARCHAR": "PGText",
+    "TEXT": "PGText",
+    "BOOLEAN": "PGBoolean",
+    "TIMESTAMP": "PGTimestamp",
+    "TIMESTAMP WITH TIME ZONE": "PGTimestamp",
+    "DATE": "PGDate",
+    "UUID": "PGUUID",
+    "JSON": "PGJsonb",
+    "JSONB": "PGJsonb",
+}
+
+
+def map_type(data_type: str) -> str:
+    """Map DuckDB data_type string to our PGType ADT."""
+    base = data_type.upper().split("(")[0].strip()
+    return DUCKDB_TO_PG_TYPE.get(base, "PGText")  # default to PGText for now
+
+
+def introspect(db_path: str) -> dict:
+    # ---- tables ----
+    tables = duckdb_json(db_path, """
+        SELECT table_name, table_schema
+        FROM information_schema.tables
+        WHERE table_schema = 'main'
+        ORDER BY table_name
+    """)
+
+    # ---- columns (one query, group in python) ----
+    columns_raw = duckdb_json(db_path, """
+        SELECT table_name, column_name, data_type, is_nullable, column_default, ordinal_position
+        FROM information_schema.columns
+        WHERE table_schema = 'main'
+        ORDER BY table_name, ordinal_position
+    """)
+    columns_by_table = {}
+    for c in columns_raw:
+        columns_by_table.setdefault(c["table_name"], []).append({
+            "name": c["column_name"],
+            "dataType": map_type(c["data_type"]),
+            "nullable": c["is_nullable"] in ("YES", True, "true"),
+            "defaultExpr": c["column_default"],
+        })
+
+    # ---- primary keys ----
+    pk_raw = duckdb_json(db_path, """
+        SELECT
+            tc.table_name,
+            kcu.column_name,
+            kcu.ordinal_position
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+        WHERE tc.table_schema = 'main'
+          AND tc.constraint_type = 'PRIMARY KEY'
+        ORDER BY tc.table_name, kcu.ordinal_position
+    """)
+    pks_by_table = {}
+    for r in pk_raw:
+        pks_by_table.setdefault(r["table_name"], []).append(r["column_name"])
+
+    # ---- unique constraints ----
+    uq_raw = duckdb_json(db_path, """
+        SELECT
+            tc.table_name,
+            tc.constraint_name,
+            kcu.column_name,
+            kcu.ordinal_position
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+        WHERE tc.table_schema = 'main'
+          AND tc.constraint_type = 'UNIQUE'
+        ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
+    """)
+    uqs_by_table = {}
+    for r in uq_raw:
+        key = (r["table_name"], r["constraint_name"])
+        uqs_by_table.setdefault(key, []).append(r["column_name"])
+    uniques_by_table = {}
+    for (tname, _cname), cols in uqs_by_table.items():
+        uniques_by_table.setdefault(tname, []).append({"columns": cols})
+
+    # ---- foreign keys ----
+    # Join referential_constraints -> key_column_usage to get FK cols
+    # Join referential_constraints -> table_constraints (via unique_constraint_name)
+    #   then -> key_column_usage to get referenced cols + ref table
+    fk_raw = duckdb_json(db_path, """
+        SELECT
+            rc.constraint_name        AS fk_name,
+            kcu.table_name            AS fk_table,
+            kcu.column_name           AS fk_column,
+            kcu.ordinal_position      AS fk_pos,
+            rc.unique_constraint_name AS ref_constraint,
+            rc.update_rule,
+            rc.delete_rule
+        FROM information_schema.referential_constraints rc
+        JOIN information_schema.key_column_usage kcu
+          ON rc.constraint_name = kcu.constraint_name
+        WHERE rc.constraint_schema = 'main'
+        ORDER BY rc.constraint_name, kcu.ordinal_position
+    """)
+    ref_kcu_raw = duckdb_json(db_path, """
+        SELECT
+            constraint_name,
+            table_name        AS ref_table,
+            column_name       AS ref_column,
+            ordinal_position
+        FROM information_schema.key_column_usage
+        WHERE constraint_schema = 'main'
+        ORDER BY constraint_name, ordinal_position
+    """)
+    ref_cols_by_constraint = {}
+    ref_table_by_constraint = {}
+    for r in ref_kcu_raw:
+        ref_cols_by_constraint.setdefault(r["constraint_name"], []).append(r["ref_column"])
+        ref_table_by_constraint[r["constraint_name"]] = r["ref_table"]
+
+    fks_by_table = {}
+    fk_buckets = {}
+    for r in fk_raw:
+        fk_buckets.setdefault(r["fk_name"], {
+            "fk_table": r["fk_table"],
+            "columns": [],
+            "ref_constraint": r["ref_constraint"],
+            "update_rule": r["update_rule"],
+            "delete_rule": r["delete_rule"],
+        })
+        fk_buckets[r["fk_name"]]["columns"].append(r["fk_column"])
+
+    for fk_name, info in fk_buckets.items():
+        ref_table = ref_table_by_constraint.get(info["ref_constraint"], "?")
+        ref_cols = ref_cols_by_constraint.get(info["ref_constraint"], [])
+        fks_by_table.setdefault(info["fk_table"], []).append({
+            "columns": info["columns"],
+            "refTable": ref_table,
+            "refColumns": ref_cols,
+            "onDelete": fk_action(info["delete_rule"]),
+            "onUpdate": fk_action(info["update_rule"]),
+        })
+
+    # ---- assemble ----
+    schema = {
+        "name": Path(db_path).stem,
+        "tables": [
+            {
+                "name": t["table_name"],
+                "schemaName": t["table_schema"],
+                "columns": columns_by_table.get(t["table_name"], []),
+                "primaryKey": pks_by_table.get(t["table_name"], []),
+                "foreignKeys": fks_by_table.get(t["table_name"], []),
+                "uniqueConstraints": uniques_by_table.get(t["table_name"], []),
+            }
+            for t in tables
+        ],
+    }
+    return schema
+
+
+def fk_action(rule: str) -> str:
+    """Map SQL action string to our FKAction ADT."""
+    if not rule:
+        return "NoAction"
+    r = rule.upper().replace(" ", "").replace("-", "")
+    return {
+        "CASCADE": "Cascade",
+        "SETNULL": "SetNull",
+        "RESTRICT": "Restrict",
+        "NOACTION": "NoAction",
+    }.get(r, "NoAction")
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__.strip())
+        sys.exit(1)
+    db_path = sys.argv[1]
+    out_path = sys.argv[2] if len(sys.argv) > 2 else None
+    schema = introspect(db_path)
+    blob = json.dumps(schema, indent=2)
+    if out_path:
+        Path(out_path).write_text(blob)
+        print(f"wrote {out_path}: {len(schema['tables'])} tables", file=sys.stderr)
+    else:
+        print(blob)
+
+
+if __name__ == "__main__":
+    main()

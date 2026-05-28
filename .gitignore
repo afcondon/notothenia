@@ -5,6 +5,7 @@ spago.lock
 
 # Alloy outputs go to <source-stem>/ next to the .als file
 minard-smoke*/
+ce-unified/
 vendor/smoke/
 
 # Vendored binaries — installed via the README

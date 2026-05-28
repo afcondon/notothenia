@@ -131,29 +131,42 @@ defaultCommands schema =
 -- | Assert: no atom is in its own transitive closure across the union
 -- | of all FK fields. UNSAT means "no counterexample within scope"
 -- | i.e. the property holds. SAT means Alloy found a cycle.
+-- |
+-- | FK field names can collide across tables (e.g. `declaration_id` may
+-- | exist on `child_declarations` AND `declaration_metrics`), so we
+-- | qualify each with its owning sig via `<:` (domain restriction).
 noFKCycleAssert :: Schema -> String -> String
 noFKCycleAssert schema scopeStr =
   let
-    fkFieldNames = collectFKFieldNames schema
+    qualified = collectQualifiedFKFields schema
   in
-    if null fkFieldNames then
+    if null qualified then
       "// (no FK fields; acyclicity trivially holds)"
     else
       let
-        unioned = intercalate " + " fkFieldNames
+        rendered = map (\{ sig, field } -> "(" <> sig <> " <: " <> field <> ")") qualified
+        unioned = intercalate " + " rendered
       in
         "assert NoFKCycle {\n"
           <> "  no a: univ | a in a.^(" <> unioned <> ")\n"
           <> "}\n"
           <> "check NoFKCycle for " <> scopeStr
 
--- | Collect the field names used to render each FK (first column of the FK).
-collectFKFieldNames :: Schema -> Array String
-collectFKFieldNames schema =
+-- | Collect the (sig, field) pairs for each FK in the schema, ensuring
+-- | uniqueness even when the same field name appears on multiple sigs.
+collectQualifiedFKFields :: Schema -> Array { sig :: String, field :: String }
+collectQualifiedFKFields schema =
   schema.tables
-    # Array.concatMap _.foreignKeys
-    # Array.mapMaybe (\fk -> map fieldName (Array.head fk.columns))
+    # Array.concatMap
+        (\t -> Array.mapMaybe
+                 (\fk -> map (\c -> { sig: sigName t.name, field: fieldName c })
+                             (Array.head fk.columns))
+                 t.foreignKeys)
     # nub
+  where
+    -- Local-scoped nub by structural equality
+    nub :: Array { sig :: String, field :: String } -> Array { sig :: String, field :: String }
+    nub = Array.nubBy (\a b -> compare a.sig b.sig <> compare a.field b.field)
 
 -- Naming helpers -------------------------------------------------------------
 
