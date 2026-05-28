@@ -10,6 +10,7 @@ package:
     - either
     - foldable-traversable
     - foreign-object
+    - httpurple
     - maybe
     - node-buffer
     - node-child-process
@@ -18,9 +19,11 @@ package:
     - node-path
     - node-process
     - node-streams
+    - ordered-collections
     - posix-types
     - refs
     - prelude
+    - routing-duplex
     - strings
     - tuples
   test:
@@ -29,4 +32,6 @@ package:
 workspace:
   packageSet:
     registry: 73.3.0
-  extraPackages: {}
+  extraPackages:
+    httpurple:
+      path: ../../purescript-httpurple-ws
