@@ -13,7 +13,7 @@ import Effect.Class.Console as Console
 import MinardDB.Alloy.Generate (generate)
 import MinardDB.Alloy.Invoke (defaultConfig, runAlloy)
 import MinardDB.Alloy.Receipt (CommandKind(..), CommandResult, Verdict(..), parseReceipt)
-import MinardDB.Schema (FKAction(..), PGType(..), Schema)
+import MinardDB.Schema (FDSource(..), FKAction(..), PGType(..), Schema)
 import Node.Encoding (Encoding(..))
 import Node.FS.Aff as FS
 import Node.Path as Path
@@ -33,6 +33,7 @@ smokeSchema =
         , primaryKey: [ "id" ]
         , foreignKeys: []
         , uniqueConstraints: [ { columns: [ "name" ] } ]
+        , functionalDependencies: []
         }
       , { name: "snapshots"
         , schemaName: "main"
@@ -51,6 +52,7 @@ smokeSchema =
               }
             ]
         , uniqueConstraints: []
+        , functionalDependencies: []
         }
       , { name: "packages"
         , schemaName: "main"
@@ -69,6 +71,7 @@ smokeSchema =
               }
             ]
         , uniqueConstraints: []
+        , functionalDependencies: []
         }
       ]
   }
@@ -94,6 +97,7 @@ cyclicSchema =
               }
             ]
         , uniqueConstraints: []
+        , functionalDependencies: []
         }
       , { name: "thing_b"
         , schemaName: "main"
@@ -111,15 +115,54 @@ cyclicSchema =
               }
             ]
         , uniqueConstraints: []
+        , functionalDependencies: []
         }
       ]
   }
 
 main :: Effect Unit
 main = launchAff_ do
-  runOne "TREE " smokeSchema
+  runOne "TREE  " smokeSchema
   Console.log ""
-  runOne "CYCLE" cyclicSchema
+  runOne "CYCLE " cyclicSchema
+  Console.log ""
+  runOne "DENORM" denormalizedSchema
+
+-- | Single-table schema with the classic `zip → city` BCNF violation.
+-- |
+-- | Why this is a violation: BCNF requires that for every non-trivial FD
+-- | X → Y, X is a superkey. The PK of `addresses` is `id`; `zip` is not
+-- | a key and there's no UNIQUE on it, so two distinct rows can share a
+-- | zip — meaning `zip` doesn't functionally determine `city` via the
+-- | schema's own constraints. Alloy will find two rows sharing a zip but
+-- | disagreeing on city, breaking the BCNF assertion.
+-- |
+-- | Real-world fix: split into `addresses(id, zip, street)` +
+-- | `zips(zip PK, city)`.
+denormalizedSchema :: Schema
+denormalizedSchema =
+  { name: "minard-smoke-denormalized"
+  , tables:
+      [ { name: "addresses"
+        , schemaName: "main"
+        , columns:
+            [ { name: "id", dataType: PGInt, nullable: false, defaultExpr: Nothing }
+            , { name: "zip", dataType: PGText, nullable: false, defaultExpr: Nothing }
+            , { name: "city", dataType: PGText, nullable: false, defaultExpr: Nothing }
+            , { name: "street", dataType: PGText, nullable: false, defaultExpr: Nothing }
+            ]
+        , primaryKey: [ "id" ]
+        , foreignKeys: []
+        , uniqueConstraints: []
+        , functionalDependencies:
+            [ { determinant: [ "zip" ]
+              , dependent: [ "city" ]
+              , source: Declared
+              }
+            ]
+        }
+      ]
+  }
 
 runOne :: String -> Schema -> Aff Unit
 runOne label schema = do

@@ -38,7 +38,10 @@ defaultConfig =
 -- | wait for exit.
 runAlloy :: AlloyConfig -> String -> Aff AlloyResult
 runAlloy cfg alsPath = makeAff \callback -> do
-  cp <- CP.spawn cfg.javaPath [ "-jar", cfg.alloyJar, "exec", alsPath ]
+  -- `-f` forces overwrite of the output directory if it exists, otherwise
+  -- Alloy aborts with "contains files. Delete them or use the -f option"
+  -- and we'd read a stale receipt.
+  cp <- CP.spawn cfg.javaPath [ "-jar", cfg.alloyJar, "exec", "-f", alsPath ]
   stdoutRef <- Ref.new ""
   stderrRef <- Ref.new ""
   CP.stdout cp # on_ Stream.dataH \chunk -> do

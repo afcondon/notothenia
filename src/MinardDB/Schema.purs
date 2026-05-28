@@ -16,6 +16,7 @@ type Table =
   , primaryKey :: Array String
   , foreignKeys :: Array ForeignKey
   , uniqueConstraints :: Array UniqueConstraint
+  , functionalDependencies :: Array FunctionalDependency
   }
 
 type Column =

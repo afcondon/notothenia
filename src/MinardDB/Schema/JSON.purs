@@ -10,7 +10,7 @@ import Data.Maybe (Maybe(..))
 import Data.Traversable (traverse)
 import Foreign.Object (Object)
 import Foreign.Object as Object
-import MinardDB.Schema (Column, FKAction(..), ForeignKey, PGType(..), Schema, Table, UniqueConstraint)
+import MinardDB.Schema (Column, FDSource(..), FKAction(..), ForeignKey, FunctionalDependency, PGType(..), Schema, Table, UniqueConstraint)
 
 -- | Parse a Schema-shaped JSON blob (produced by tools/introspect-duckdb.py)
 -- | into a Schema value (declared FKs only).
@@ -88,10 +88,15 @@ parseTable includeInferred j = do
       Nothing -> Right []
   uqsJ <- objArray obj "uniqueConstraints"
   uniqueConstraints <- traverse parseUnique uqsJ
+  functionalDependencies <- case Object.lookup "functionalDependencies" obj of
+    Nothing -> Right []
+    Just fdj -> case toArray fdj of
+      Just arr -> traverse parseFD arr
+      Nothing -> Right []
   let foreignKeys = if includeInferred
         then declaredFKs <> inferredFKs
         else declaredFKs
-  pure { name, schemaName, columns, primaryKey, foreignKeys, uniqueConstraints }
+  pure { name, schemaName, columns, primaryKey, foreignKeys, uniqueConstraints, functionalDependencies }
 
 parseColumn :: Json -> Either String Column
 parseColumn j = do
@@ -140,6 +145,21 @@ parseUnique j = do
   obj <- j # toObject # note "uniqueConstraint is not an object"
   columns <- objStringArray obj "columns"
   pure { columns }
+
+parseFD :: Json -> Either String FunctionalDependency
+parseFD j = do
+  obj <- j # toObject # note "functionalDependency is not an object"
+  determinant <- objStringArray obj "determinant"
+  dependent <- objStringArray obj "dependent"
+  -- For now we only accept Declared FDs from the introspector / fixtures.
+  -- Inferred FDs (from data sampling) arrive in a later phase.
+  source <- case Object.lookup "source" obj of
+    Just sj -> case toString sj of
+      Just "Declared" -> Right Declared
+      Just other -> Left ("unsupported FD source: " <> other)
+      Nothing -> Left "`source` is not a string"
+    Nothing -> Right Declared  -- default
+  pure { determinant, dependent, source }
 
 -- Helpers -------------------------------------------------------------
 

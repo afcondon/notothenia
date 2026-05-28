@@ -210,6 +210,7 @@ def introspect(db_path: str) -> dict:
                 "foreignKeys": fks_by_table.get(t["table_name"], []),
                 "inferredForeignKeys": inferred_by_table.get(t["table_name"], []),
                 "uniqueConstraints": uniques_by_table.get(t["table_name"], []),
+                "functionalDependencies": [],
             }
             for t in tables
         ],
