@@ -172,6 +172,32 @@ def introspect(db_path: str) -> dict:
             "onUpdate": fk_action(info["update_rule"]),
         })
 
+    # ---- inferred FKs (by `<entity>_id` naming convention) ----
+    table_names = {t["table_name"] for t in tables}
+    inferred_by_table = {}
+    for tname, cols in columns_by_table.items():
+        declared_fk_cols = {
+            c for fk in fks_by_table.get(tname, [])
+            for c in fk["columns"]
+        }
+        for col in cols:
+            cname = col["name"]
+            if cname == "id" or not cname.endswith("_id"):
+                continue
+            if cname in declared_fk_cols:
+                continue
+            target = infer_target_table(cname, table_names, own_table=tname)
+            if target is None:
+                continue
+            inferred_by_table.setdefault(tname, []).append({
+                "columns": [cname],
+                "refTable": target,
+                "refColumns": ["id"],
+                "onDelete": "NoAction",
+                "onUpdate": "NoAction",
+                "source": "inferred",
+            })
+
     # ---- assemble ----
     schema = {
         "name": Path(db_path).stem,
@@ -182,12 +208,40 @@ def introspect(db_path: str) -> dict:
                 "columns": columns_by_table.get(t["table_name"], []),
                 "primaryKey": pks_by_table.get(t["table_name"], []),
                 "foreignKeys": fks_by_table.get(t["table_name"], []),
+                "inferredForeignKeys": inferred_by_table.get(t["table_name"], []),
                 "uniqueConstraints": uniques_by_table.get(t["table_name"], []),
             }
             for t in tables
         ],
     }
     return schema
+
+
+def infer_target_table(col_name: str, table_names: set, own_table: str):
+    """Given a column like `project_id`, find a plausible target table.
+
+    Strategies, in priority order:
+      1. `<stem>s`  — singular noun → plural table name (project_id → projects)
+      2. `<stem>`   — column stem matches table name directly (tag_id → tags? no)
+      3. Self-reference: parent_id, parent_<x>_id → own_table
+      4. Common pattern: blocker_id, blocked_id, source_id, target_id, supersedes_id
+         when own_table is plausibly a relationship table or related concept
+    """
+    stem = col_name[:-3]  # strip "_id"
+    # Strategy 1: pluralize
+    if (stem + "s") in table_names:
+        return stem + "s"
+    # Strategy 2: stem matches directly (e.g. "metadata_id" -> "metadata")
+    if stem in table_names:
+        return stem
+    # Strategy 3: parent_id and self-reference patterns
+    if stem in ("parent", "supersedes"):
+        return own_table
+    # Strategy 4: "blocker"/"blocked"/"source"/"target" often reference projects
+    # for project-relationship tables; check if "projects" exists as a guess
+    if stem in ("blocker", "blocked", "source", "target") and "projects" in table_names:
+        return "projects"
+    return None
 
 
 def fk_action(rule: str) -> str:

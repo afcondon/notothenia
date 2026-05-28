@@ -104,9 +104,11 @@ renderUniqueFacts t = map (renderUniqueFact t) t.uniqueConstraints
 renderUniqueFact :: Table -> UniqueConstraint -> String
 renderUniqueFact t uc =
   let
-    sig = sigName t.name
+    -- Qualify the sig with `this/` to disambiguate from any field of
+    -- the same name (e.g. Marginalia has `tags` as both a sig and a
+    -- field on `project_with_tags`).
+    sig = "this/" <> sigName t.name
     factName = "Unique_" <> t.name <> "_" <> intercalate "_" uc.columns
-    -- For each unique column, compare a.col != b.col
     comparisons = map (\c -> "a." <> fieldName c <> " != b." <> fieldName c) uc.columns
     body = intercalate " or " comparisons
   in

@@ -4,7 +4,9 @@ import Prelude
 
 import Data.Argonaut.Core (Json, toArray, toBoolean, toObject, toString)
 import Data.Argonaut.Parser (jsonParser)
+import Data.Array as Array
 import Data.Either (Either(..))
+import Data.Foldable (sum)
 import Data.Maybe (Maybe(..))
 import Data.Traversable (traverse)
 import Foreign.Object (Object)
@@ -12,18 +14,43 @@ import Foreign.Object as Object
 import MinardDB.Schema (Column, FKAction(..), ForeignKey, PGType(..), Schema, Table, UniqueConstraint)
 
 -- | Parse a Schema-shaped JSON blob (produced by tools/introspect-duckdb.py)
--- | into a Schema value.
+-- | into a Schema value (declared FKs only).
 parseSchema :: String -> Either String Schema
-parseSchema text = do
+parseSchema text = parseSchemaFull text <#> _.declared
+
+-- | Result of parsing a schema JSON file: the canonical declared schema
+-- | plus a separate count and list of inferred FKs (candidates).
+type ParsedSchema =
+  { declared :: Schema
+  , inferredFKCount :: Int
+  -- | A version of the schema with inferred FKs merged into foreignKeys,
+  -- | suitable for running proofs against the "what if these were
+  -- | declared?" scenario.
+  , withInferred :: Schema
+  }
+
+parseSchemaFull :: String -> Either String ParsedSchema
+parseSchemaFull text = do
   json <- jsonParser text
   obj <- json # toObject # note "schema root is not an object"
   name <- objString obj "name"
   tablesJ <- objArray obj "tables"
-  tables <- traverse parseTable tablesJ
-  pure { name, tables }
+  declaredTables <- traverse (parseTable false) tablesJ
+  mergedTables <- traverse (parseTable true) tablesJ
+  let inferredCount = sumInferred mergedTables - sumDeclared declaredTables
+  pure
+    { declared: { name, tables: declaredTables }
+    , inferredFKCount: inferredCount
+    , withInferred: { name, tables: mergedTables }
+    }
+  where
+    sumDeclared ts = ts # map (\t -> Array.length t.foreignKeys) # sum
+    sumInferred ts = ts # map (\t -> Array.length t.foreignKeys) # sum
 
-parseTable :: Json -> Either String Table
-parseTable j = do
+-- | If `includeInferred` is true, merge `inferredForeignKeys` into
+-- | `foreignKeys`. Otherwise only declared FKs are used.
+parseTable :: Boolean -> Json -> Either String Table
+parseTable includeInferred j = do
   obj <- j # toObject # note "table is not an object"
   name <- objString obj "name"
   schemaName <- objString obj "schemaName"
@@ -31,9 +58,17 @@ parseTable j = do
   columns <- traverse parseColumn columnsJ
   primaryKey <- objStringArray obj "primaryKey"
   fksJ <- objArray obj "foreignKeys"
-  foreignKeys <- traverse parseFK fksJ
+  declaredFKs <- traverse parseFK fksJ
+  inferredFKs <- case Object.lookup "inferredForeignKeys" obj of
+    Nothing -> Right []
+    Just ij -> case toArray ij of
+      Just arr -> traverse parseFK arr
+      Nothing -> Right []
   uqsJ <- objArray obj "uniqueConstraints"
   uniqueConstraints <- traverse parseUnique uqsJ
+  let foreignKeys = if includeInferred
+        then declaredFKs <> inferredFKs
+        else declaredFKs
   pure { name, schemaName, columns, primaryKey, foreignKeys, uniqueConstraints }
 
 parseColumn :: Json -> Either String Column

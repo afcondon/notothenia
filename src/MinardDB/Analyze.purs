@@ -9,12 +9,14 @@ import Data.Maybe (Maybe(..))
 import Data.String as String
 import Effect (Effect)
 import Effect.Aff (Aff, launchAff_)
+import Effect.Class (liftEffect)
 import Effect.Class.Console as Console
+import Node.Process as Process
 import MinardDB.Alloy.Generate (generate)
 import MinardDB.Alloy.Invoke (defaultConfig, runAlloy)
 import MinardDB.Alloy.Receipt (CommandKind(..), CommandResult, Verdict(..), parseReceipt)
 import MinardDB.Schema (Schema)
-import MinardDB.Schema.JSON (parseSchema)
+import MinardDB.Schema.JSON (parseSchemaFull)
 import Node.Encoding (Encoding(..))
 import Node.FS.Aff as FS
 import Node.Path as Path
@@ -24,17 +26,25 @@ import Node.Path as Path
 analyze :: String -> Aff Unit
 analyze jsonPath = do
   jsonText <- FS.readTextFile UTF8 jsonPath
-  case parseSchema jsonText of
+  case parseSchemaFull jsonText of
     Left err -> Console.log $ "schema parse error: " <> err
-    Right schema -> do
-      Console.log $ "Loaded schema: " <> schema.name <> " ("
-        <> show (Array.length schema.tables) <> " tables, "
-        <> show (totalFKs schema) <> " FKs)"
-      let alsPath = "/tmp/" <> schema.name <> ".als"
-      FS.writeTextFile UTF8 alsPath (generate schema)
-      Console.log $ "Wrote " <> alsPath <> ", running Alloy…"
+    Right parsed -> do
+      let declaredFKs = totalFKs parsed.declared
+      Console.log $ "Loaded schema: " <> parsed.declared.name <> " ("
+        <> show (Array.length parsed.declared.tables) <> " tables, "
+        <> show declaredFKs <> " declared FKs, "
+        <> show parsed.inferredFKCount <> " inferred FKs)"
+      when (declaredFKs == 0 && parsed.inferredFKCount > 0) do
+        Console.log "  ⚠  NO DECLARED FOREIGN KEYS — referential integrity is application-mediated"
+        Console.log "  Inferred FKs (from <entity>_id naming convention):"
+        traverse_ (Console.log <<< ("    " <> _)) (formatInferredFKs parsed.withInferred)
+      let scheme = if declaredFKs > 0 then parsed.declared else parsed.withInferred
+      let label = if declaredFKs > 0 then "declared FKs" else "inferred FKs (proof shows hypothetical)"
+      Console.log $ "Running proof against " <> label <> "…"
+      let alsPath = "/tmp/" <> scheme.name <> ".als"
+      FS.writeTextFile UTF8 alsPath (generate scheme)
       result <- runAlloy defaultConfig alsPath
-      let receiptPath = Path.concat [ schema.name, "receipt.json" ]
+      let receiptPath = Path.concat [ scheme.name, "receipt.json" ]
       receiptText <- FS.readTextFile UTF8 receiptPath
       case parseReceipt receiptText of
         Left err ->
@@ -44,11 +54,19 @@ analyze jsonPath = do
             <> show result.exitCode <> ":"
           Console.log $ "  " <> formatHeader
           traverse_ (Console.log <<< ("  " <> _) <<< formatRow) cmds
-          traverse_ (explainCounterexample schema.name) cmds
+          traverse_ (explainCounterexample scheme.name) cmds
 
 totalFKs :: Schema -> Int
 totalFKs schema =
   schema.tables # Array.concatMap _.foreignKeys # Array.length
+
+formatInferredFKs :: Schema -> Array String
+formatInferredFKs schema =
+  schema.tables # Array.concatMap \t ->
+    t.foreignKeys # map \fk ->
+      padR 24 t.name
+        <> "(" <> padR 16 (String.joinWith "," fk.columns)
+        <> ") -> " <> fk.refTable
 
 formatHeader :: String
 formatHeader =
@@ -119,4 +137,8 @@ padR n s =
 
 main :: Effect Unit
 main = launchAff_ do
-  analyze "/tmp/minard-schema.json"
+  args <- liftEffect $ Array.drop 2 <$> Process.argv
+  let jsonPath = case Array.head args of
+        Just p -> p
+        Nothing -> "/tmp/minard-schema.json"
+  analyze jsonPath

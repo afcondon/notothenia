@@ -16,6 +16,7 @@ package:
     - node-event-emitter
     - node-fs
     - node-path
+    - node-process
     - node-streams
     - posix-types
     - refs
