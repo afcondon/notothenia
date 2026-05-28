@@ -3,16 +3,22 @@ package:
   description: "Minard-DB — schema cartography with Alloy-backed proofs"
   dependencies:
     - aff
+    - argonaut-core
     - arrays
     - console
     - effect
     - either
     - foldable-traversable
+    - foreign-object
     - maybe
     - node-buffer
     - node-child-process
+    - node-event-emitter
     - node-fs
     - node-path
+    - node-streams
+    - posix-types
+    - refs
     - prelude
     - strings
     - tuples
