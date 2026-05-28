@@ -17,7 +17,7 @@ import Node.Encoding (Encoding(..))
 import Node.EventEmitter (on_)
 import Node.FS.Aff as FS
 import Node.Stream as Stream
-import MinardDB.Alloy.Receipt (CommandKind(..), CommandResult, Verdict(..))
+import MinardDB.Alloy.Receipt (CommandResult)
 
 -- | Where notothenia stores its analysis history.
 type StorageConfig =
@@ -43,6 +43,7 @@ type AnalysisRecord =
   -- | One entry per Alloy command run.
   , proofs :: Array
       { command :: CommandResult
+      , interpretation :: String  -- computed by Analyze using AlloyCheck body kind
       , witness :: Maybe String
       , scope :: Int
       , minScope :: Maybe Int  -- populated by Minimize when a SAT check is shrunk
@@ -119,19 +120,13 @@ generateInserts rec =
                 <> ", " <> str (show c.kind)
                 <> ", " <> str c.source
                 <> ", " <> str (show c.verdict)
-                <> ", " <> str (interpret c)
+                <> ", " <> str p.interpretation
                 <> ", " <> witness
                 <> ", " <> show p.scope
                 <> ", " <> minScope <> ")"
         in
           "INSERT INTO analysis_proofs (analysis_id, command_name, kind, source, verdict, interpretation, witness, scope, min_scope) VALUES\n  "
             <> intercalate ",\n  " values <> ";"
-
-    interpret c = case c.kind, c.verdict of
-      Check, NoCounterexample -> "PROVEN (no counterexample within scope)"
-      Check, Counterexample -> "BROKEN (counterexample exists)"
-      Run, Counterexample -> "instance found"
-      Run, NoCounterexample -> "no satisfying instance"
 
 -- SQL escaping: wrap in single quotes, doubling any embedded ones.
 str :: String -> String

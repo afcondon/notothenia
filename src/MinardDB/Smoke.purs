@@ -12,7 +12,8 @@ import Effect.Aff (Aff, launchAff_)
 import Effect.Class.Console as Console
 import MinardDB.Alloy.Generate (generate)
 import MinardDB.Alloy.Invoke (defaultConfig, runAlloy)
-import MinardDB.Alloy.Receipt (CommandKind(..), CommandResult, Verdict(..), parseReceipt)
+import MinardDB.Alloy.Receipt (CommandResult, parseReceipt)
+import MinardDB.Properties (AlloyCheck, defaultProperties, interpretCommand)
 import MinardDB.Schema (FDSource(..), FKAction(..), PGType(..), Schema)
 import Node.Encoding (Encoding(..))
 import Node.FS.Aff as FS
@@ -176,10 +177,11 @@ runOne label schema = do
     Left err ->
       Console.log $ "[" <> label <> "] receipt parse error: " <> err
     Right cmds -> do
+      let catalog = defaultProperties >>= (_ $ schema)
       Console.log $ "[" <> label <> "] " <> show (Array.length cmds) <>
         " commands, exit " <> show result.exitCode <> ":"
       Console.log $ "  " <> formatHeader
-      traverse_ (Console.log <<< ("  " <> _) <<< formatRow) cmds
+      traverse_ (Console.log <<< ("  " <> _) <<< formatRow catalog) cmds
 
 formatHeader :: String
 formatHeader =
@@ -188,19 +190,12 @@ formatHeader =
     <> padR 8 "verdict"
     <> "interpretation"
 
-formatRow :: CommandResult -> String
-formatRow r =
+formatRow :: Array AlloyCheck -> CommandResult -> String
+formatRow catalog r =
   padR 24 r.name
     <> padR 8 (show r.kind)
     <> padR 8 (show r.verdict)
-    <> interpretation r
-
-interpretation :: CommandResult -> String
-interpretation r = case r.kind, r.verdict of
-  Check, NoCounterexample -> "PROVEN (no counterexample within scope)"
-  Check, Counterexample -> "BROKEN (counterexample exists)"
-  Run, Counterexample -> "instance found"
-  Run, NoCounterexample -> "no satisfying instance"
+    <> interpretCommand (Array.find (\c -> c.name == r.name) catalog) r
 
 padR :: Int -> String -> String
 padR n s =

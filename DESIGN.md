@@ -24,8 +24,28 @@ analyses captured:
   inferred from naming convention; `projects.parent_id`
   self-reference cycle hypothetically reachable.
 
-**Phase 2 — next, see below.** Now framed as the QuickCheck-family
+**Phase 2 — in progress.** Now framed as the QuickCheck-family
 member it actually is.
+
+- **2a (validity partition + BCNF + fault-localization)** — done.
+  Generated `.als` is split into VALIDITY FACTS / PROPERTIES UNDER
+  TEST sections; BCNF emits one `assert`/`check` per declared FD so
+  the witness names the offending dependency.
+- **2b (scope minimization — the shrinking analogue)** — done.
+  Binary search downward from initialScope; the smallest
+  counterexample-producing scope is persisted as `min_scope` and
+  rendered as `N → m` in the frontend, matching QC shrinker
+  notation.
+- **2c (coverage probes — the `classify` analogue)** — done.
+  Three `run` commands per schema (`AcyclicShape`, `CyclicShape`,
+  `ChainOfLength2`) report whether each FK-graph shape is
+  realizable within scope. On a structurally-safe schema like the
+  TREE smoke fixture, `CyclicShape UNSAT` corroborates `NoFKCycle`
+  PROVEN — the proof has bite because the constraints actively
+  rule out cycles, not just "we didn't happen to find one".
+- **2d (topology view)** — remaining. Hylograph schema graph with
+  per-table normal-form colouring, violation edges highlighted,
+  fault-localized FD called out.
 
 **Note: Data Model section below has drifted.** The plan originally
 described a shared `minard_db_*` namespace inside Minard's DuckDB.

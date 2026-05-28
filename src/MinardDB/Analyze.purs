@@ -17,7 +17,7 @@ import MinardDB.Alloy.Generate (generate)
 import MinardDB.Alloy.Invoke (defaultConfig, runAlloy)
 import MinardDB.Alloy.Minimize (minimizeScope)
 import MinardDB.Alloy.Receipt (CommandKind(..), CommandResult, Verdict(..), parseReceipt)
-import MinardDB.Properties (AlloyCheck, defaultProperties, defaultScope)
+import MinardDB.Properties (AlloyCheck, defaultProperties, defaultScope, interpretCommand)
 import MinardDB.Schema (Schema)
 import MinardDB.Schema.JSON (ParsedSchema, parseSchemaFull)
 import MinardDB.Storage (AnalysisRecord, defaultStorageConfig, store)
@@ -60,13 +60,13 @@ analyzeParsed sourcePath parsed = do
   case parseReceipt receiptText of
     Left err -> Console.log $ "receipt parse error: " <> err
     Right cmds -> do
+      let catalog = defaultProperties >>= (_ $ scheme)
       Console.log $ show (Array.length cmds) <> " commands, exit "
         <> show result.exitCode <> ":"
       Console.log $ "  " <> formatHeader
-      traverse_ (Console.log <<< ("  " <> _) <<< formatRow) cmds
+      traverse_ (Console.log <<< ("  " <> _) <<< formatRow catalog) cmds
       witnesses <- traverse (fetchWitness scheme.name) cmds
       traverse_ printWitness (Array.zip cmds witnesses)
-      let catalog = defaultProperties >>= (_ $ scheme)
       let satCount = Array.length $ Array.filter
             (\c -> c.kind == Check && c.verdict == Counterexample) cmds
       when (satCount > 0) do
@@ -78,11 +78,13 @@ analyzeParsed sourcePath parsed = do
       persist sourcePath parsed declaredFKs inferredCount proofs
 
 -- | A proof record carrying everything we need to persist a single
--- | Alloy command's outcome: the raw verdict, the witness atom (if any),
--- | the scope at which Alloy was invoked, and (for SAT verdicts) the
--- | smallest scope at which the property still breaks.
+-- | Alloy command's outcome: the raw verdict, a human-readable
+-- | interpretation derived from the AlloyCheck body kind, the witness
+-- | atom (if any), the scope at which Alloy was invoked, and (for SAT
+-- | verdicts) the smallest scope at which the property still breaks.
 type ProofRecord =
   { command :: CommandResult
+  , interpretation :: String
   , witness :: Maybe String
   , scope :: Int
   , minScope :: Maybe Int
@@ -98,10 +100,11 @@ buildProof catalog schema (Tuple cmd witness) = do
     scope = case mcheck of
       Just c -> c.scope
       Nothing -> defaultScope schema  -- e.g. for the synthetic `show` run
+    interpretation = interpretCommand mcheck cmd
   minScope <- case cmd.kind, cmd.verdict, mcheck of
     Check, Counterexample, Just check -> minimizeScope defaultConfig schema check
     _, _, _ -> pure Nothing
-  pure { command: cmd, witness, scope, minScope }
+  pure { command: cmd, interpretation, witness, scope, minScope }
 
 printMinScope :: ProofRecord -> Aff Unit
 printMinScope p = case p.minScope of
@@ -187,19 +190,12 @@ formatHeader :: String
 formatHeader =
   padR 28 "command" <> padR 8 "kind" <> padR 8 "verdict" <> "interpretation"
 
-formatRow :: CommandResult -> String
-formatRow r =
+formatRow :: Array AlloyCheck -> CommandResult -> String
+formatRow catalog r =
   padR 28 r.name
     <> padR 8 (show r.kind)
     <> padR 8 (show r.verdict)
-    <> interpretation r
-
-interpretation :: CommandResult -> String
-interpretation r = case r.kind, r.verdict of
-  Check, NoCounterexample -> "PROVEN (no counterexample within scope)"
-  Check, Counterexample -> "BROKEN (counterexample exists)"
-  Run, Counterexample -> "instance found"
-  Run, NoCounterexample -> "no satisfying instance"
+    <> interpretCommand (Array.find (\c -> c.name == r.name) catalog) r
 
 padR :: Int -> String -> String
 padR n s =
