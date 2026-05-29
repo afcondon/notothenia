@@ -308,6 +308,23 @@ Each rung is concrete. The Schema AST is the pivot between value-world
    BCNF, FK-acyclicity, lossless join, migration-RI. Their typed bindings
    gain the global proofs the type system structurally can't express.
 
+   **STATUS (2026-05-29): DONE (5c).** `MinardDB.Codegen.YogaProve`
+   parses yoga `Table` types to a `Schema` (rung-1 reverse bridge) and
+   feeds it straight into `Smoke.runOne` — the proof catalog is
+   indifferent to where the Schema came from. Demonstrated on three
+   fixtures: real generated Marginalia bindings (honestly vacuous —
+   disabled DuckDB FKs + no FDs in types), a hand-written acyclic typed
+   schema (`NoFKCycle` PROVEN; the model finder confirms it can't host a
+   cycle), and a cyclic one (`NoFKCycle` BROKEN, 2-row counterexample).
+   **The honest finding that fell out:** FK-acyclicity *is* provable
+   from yoga types (FKs survive the round-trip), but **BCNF is
+   structurally not** — a `Table` type cannot carry a non-key functional
+   dependency. This is engine-independent, not a DuckDB artifact: no
+   relational catalog stores non-key FDs, so non-vacuous BCNF always
+   needs FD inference or annotation. (The disabled-FK thinness of the
+   Marginalia example, by contrast, *is* a DuckDB artifact — a Postgres
+   source restores live FKs and a real, non-vacuous acyclicity proof.)
+
 3. **Reach + dead columns as a *compile-time* computation.** Collect the
    app's queries into a type-visible **query manifest** (record of `Q`s);
    a type class folds `result ∪ params ∪ where-cols` across it and

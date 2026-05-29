@@ -350,9 +350,29 @@ member it actually is.
   Default = optional on insert). Fixed to emit both
   (`DefaultExpr "current_timestamp" (Nullable DateTime)`), re-validated
   against real yoga.
-- **5c+ (Alloy-on-yoga-types; compile-time reach/dead-columns via a
-  query manifest; migration-breaks-a-query as a type error)** — the
-  extension ladder rungs 2–4. See `docs/SYNTHESIS.md`.
+- **5c / rung 2 (Alloy proof catalog on a yoga-types-derived Schema)**
+  — done. `MinardDB.Codegen.YogaProve` runs the full proof catalog on a
+  `Schema` reconstructed (via `YogaParse`) from rowtype-yoga `Table`
+  *types* — i.e. it proves structural properties of the schema an
+  agent's typed bindings describe, reusing `Smoke.runOne` verbatim (the
+  proof catalog is indifferent to Schema provenance: DDL, live catalog,
+  or types). Three fixtures: the real generated Marginalia bindings
+  (honest vacuity — `NoFKCycle` vacuous because its FKs are disabled in
+  DuckDB, `BCNF` vacuous because yoga types can't carry FDs); a
+  hand-written acyclic typed schema (reviews→books→authors) →
+  `NoFKCycle` **PROVEN** and the model finder confirms the schema can't
+  even host a cycle (`CyclicShape` UNSAT); a cyclic one (orgs⇄people) →
+  `NoFKCycle` **BROKEN** with a 2-row counterexample.
+  Honest rung-2 finding: **FK-acyclicity is fully provable from yoga
+  types** (ForeignKey…References survives the round-trip), but **BCNF is
+  structurally not** — a yoga `Table` type cannot express a non-key FD,
+  so the reconstructed Schema always has `functionalDependencies: []`.
+  This is neither a notothenia bug nor a DuckDB artifact: no relational
+  catalog stores non-key FDs either, so non-vacuous BCNF needs FD
+  inference or annotation on any engine.
+- **5d+ (compile-time reach/dead-columns via a query manifest;
+  migration-breaks-a-query as a type error)** — the extension ladder
+  rungs 3–4. See `docs/SYNTHESIS.md`.
 
 **Note: Data Model section below has drifted.** The plan originally
 described a shared `minard_db_*` namespace inside Minard's DuckDB.

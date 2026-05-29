@@ -10,6 +10,7 @@ marginalia-tracker/
 denormalized-fixture/
 tmp-minimize-*/
 migration-*/
+yoga-*/
 minimal-row-debug/
 vendor/smoke/
 
