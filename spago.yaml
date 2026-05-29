@@ -20,6 +20,7 @@ package:
     - node-process
     - node-streams
     - ordered-collections
+    - parsing
     - posix-types
     - refs
     - prelude

@@ -123,9 +123,26 @@ member it actually is.
   row-shape commitment that survives FK-toggling matches the
   real-DB intuition (a row referencing another row doesn't
   forget about it just because the FK constraint is dropped).
-- **3d (SQL parsing)** — defer. Hand-coded migrations are
-  sufficient to nail the semantics; a `parseSql` pass is
-  mechanical and lands once 3a/3b/3c are stable.
+- **3d (SQL parsing)** — done. `MinardDB.Migration.SQL.parseSql`
+  consumes a multi-statement DDL script (CREATE / DROP /
+  ALTER TABLE — the migration vocabulary) into a
+  `MigrationSequence`. Hand-rolled recursive-descent over
+  `purescript-parsing`; accepts case-insensitive keywords,
+  quoted identifiers, schema qualifiers, `--` line comments,
+  and `/* */` block comments. Inline column-level constraints
+  (PRIMARY KEY, NOT NULL, UNIQUE, REFERENCES, DEFAULT) and
+  table-level constraints (PRIMARY KEY, FOREIGN KEY,
+  UNIQUE, CONSTRAINT n …) all fold back into the same
+  `Table` shape the hand-coded fixtures produce. Smoke test
+  (`MinardDB.Migration.SQL.Smoke`) parses safe / unsafe-t /
+  unsafe-c as DDL strings and runs them through the
+  temporal pipeline; verdicts match the hand-coded
+  fixtures exactly. What we *don't* parse: CHECK
+  constraints, indexes, views, triggers, sequences,
+  extensions, vendor-specific dialects — the proof pipeline
+  doesn't consume them, and a real script that exercises
+  them will get a positional error the caller can rewrite
+  around.
 - **3e (migration timeline UI)** — defer until the safety
   pass has a real use case in the wild.
 
