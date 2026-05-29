@@ -1,0 +1,205 @@
+/* Notothenia — landing page. Swiss / International typographic style:
+   light ground, ink type, restrained palette, hierarchy through scale
+   and weight, generous whitespace. */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --ink: #1a1a1a;
+  --ground: #fafafa;
+  --grey: #666;
+  --rule: #e0e0e0;
+  --green: #2e7d32;
+  --red: #c62828;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background: var(--ground);
+  color: var(--ink);
+  line-height: 1.65;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 980px; margin: 0 auto; padding: 0 2rem; }
+
+code {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: #ececec;
+  padding: 0.08em 0.35em;
+  border-radius: 3px;
+}
+
+a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+a:hover { color: var(--grey); }
+
+/* Hero ----------------------------------------------------------------- */
+
+.hero {
+  border-bottom: 3px solid var(--ink);
+  padding: 6rem 0 3.5rem;
+}
+
+.hero h1 {
+  font-size: 5rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 0.95;
+}
+
+.tagline {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-top: 0.75rem;
+  letter-spacing: -0.01em;
+}
+
+.lede {
+  max-width: 40rem;
+  margin-top: 1.5rem;
+  font-size: 1.15rem;
+  color: #333;
+}
+
+/* Bands & sections ----------------------------------------------------- */
+
+.band { padding: 3.5rem 0; border-bottom: 1px solid var(--rule); }
+
+.band h2 {
+  font-size: 1.9rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  max-width: 30rem;
+  margin-bottom: 1.25rem;
+}
+
+.band p { max-width: 42rem; margin-bottom: 1rem; color: #2a2a2a; }
+
+/* Feature blocks with screenshots -------------------------------------- */
+
+.feature {
+  display: grid;
+  grid-template-columns: 1fr 1.1fr;
+  gap: 3rem;
+  align-items: center;
+  padding: 4rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.feature.reverse .feature-text { order: 2; }
+.feature.reverse figure { order: 1; }
+
+.feature h3 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 1rem;
+}
+
+.feature p { margin-bottom: 1rem; color: #2a2a2a; }
+
+.feature figure {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.07);
+  max-height: 520px;
+}
+
+.feature figure img { display: block; width: 100%; height: auto; }
+
+/* Pipeline list -------------------------------------------------------- */
+
+.pipeline {
+  list-style: none;
+  counter-reset: step;
+  max-width: 44rem;
+  margin: 1.5rem 0;
+}
+
+.pipeline li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 3rem;
+  margin-bottom: 1.1rem;
+  color: #2a2a2a;
+}
+
+.pipeline li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2rem;
+  height: 2rem;
+  background: var(--ink);
+  color: var(--ground);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.scope-note {
+  font-size: 0.95rem;
+  color: var(--grey);
+  border-left: 3px solid var(--rule);
+  padding-left: 1rem;
+  font-style: italic;
+}
+
+/* Proof catalog grid --------------------------------------------------- */
+
+.proof-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.proof-grid > div {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: #fff;
+  padding: 1.1rem 1.25rem;
+}
+
+.proof-grid h4 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+}
+
+.proof-grid p { font-size: 0.9rem; color: var(--grey); margin: 0; max-width: none; }
+
+/* Footer --------------------------------------------------------------- */
+
+.site-footer { padding: 3.5rem 0 5rem; }
+
+.codd {
+  font-size: 1.2rem;
+  font-style: italic;
+  color: #333;
+  margin-bottom: 1.5rem;
+}
+
+.site-footer .meta { font-size: 0.9rem; color: var(--grey); max-width: 42rem; margin-bottom: 0.4rem; }
+.site-footer .status { font-weight: 600; color: var(--ink); }
+
+/* Responsive ----------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .hero { padding: 4rem 0 2.5rem; }
+  .hero h1 { font-size: 3.25rem; }
+  .tagline { font-size: 1.2rem; }
+  .feature { grid-template-columns: 1fr; gap: 1.5rem; }
+  .feature.reverse .feature-text,
+  .feature.reverse figure { order: initial; }
+}

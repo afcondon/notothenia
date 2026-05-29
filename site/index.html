@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notothenia — schema cartography with Alloy-backed proofs</title>
+  <meta name="description" content="A database schema is a type system. Notothenia goes past linters and reports to proofs: normal-form verification, migration safety, and query reach, with Alloy as the verification backend.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header class="hero">
+    <div class="wrap">
+      <h1>Notothenia</h1>
+      <p class="tagline">Schema cartography with Alloy-backed proofs.</p>
+      <p class="lede">
+        A database schema <em>is</em> a type system — normal forms are
+        safety levels, foreign keys are type-level references,
+        denormalization is <code>unsafeCoerce</code>. Most tools stop at
+        linting and reports. Notothenia goes to <strong>proofs</strong>.
+      </p>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <section class="band">
+      <h2>State the invariant. Let the machine find the counterexample.</h2>
+      <p>
+        Notothenia is a member of the <strong>QuickCheck family</strong>.
+        Where SmallCheck exhaustively enumerates small values, Notothenia
+        compiles your schema to a model for <a href="https://alloytools.org/">Alloy</a>
+        — Daniel Jackson's relational model finder — and asks its SAT
+        solver to either prove a property holds within scope or hand back
+        a concrete counterexample: the specific rows that break it.
+      </p>
+      <p>
+        It borrows the ergonomics the QuickCheck family spent years
+        building around that core loop: a <em>validity partition</em>
+        (every counterexample is a meaningful schema, never a degenerate
+        one), <em>scope minimization</em> in place of shrinking (report
+        the smallest scope at which a property breaks), and
+        <em>fault localization</em> (name the offending functional
+        dependency, not just "the rows").
+      </p>
+    </section>
+
+    <section class="feature">
+      <div class="feature-text">
+        <h3>Migration verification</h3>
+        <p>
+          Migrations are type-system evolution. Notothenia compiles an
+          ordered migration sequence into an Alloy&nbsp;6 <em>temporal</em>
+          model and proves referential integrity holds across the
+          <em>entire trace</em> — not just at the endpoints.
+        </p>
+        <p>
+          The difference matters. Run it on the PureScript Registry's real
+          migration history and it flags a <strong>transient dangling
+          foreign key</strong>: a step that drops a table while another
+          still references it. The migration ends perfectly consistent, so
+          an endpoint diff calls it clean — but referential integrity was
+          violated <em>in transit</em>. The timeline shows exactly where.
+        </p>
+      </div>
+      <figure>
+        <img src="img/migration-timeline.png" alt="Migration timeline view showing a transient referential-integrity violation at the DROP TABLE step">
+      </figure>
+    </section>
+
+    <section class="feature reverse">
+      <div class="feature-text">
+        <h3>Query reach &amp; dead columns</h3>
+        <p>
+          Point Notothenia at a schema and the queries that run against it,
+          and it resolves what each query <em>touches</em> — through joins,
+          aliases, wildcards, and SQL's name-resolution rules — down to the
+          column.
+        </p>
+        <p>
+          Aggregate that across a codebase and the <strong>dead
+          columns</strong> fall out: columns no query references. Run on
+          Marginalia's own schema and server, 26 columns surface as dead —
+          dominated by two tables the server only ever cascade-deletes. A
+          dead column is a <code>DROP COLUMN</code> candidate; the
+          migration verifier can then prove the drop is safe before you
+          commit to it.
+        </p>
+      </div>
+      <figure>
+        <img src="img/reach-heatmap.png" alt="Schema usage heatmap: every column drawn with a bar proportional to how many queries touch it, dead columns struck through">
+      </figure>
+    </section>
+
+    <section class="band">
+      <h2>How it works</h2>
+      <ol class="pipeline">
+        <li><strong>Ingest.</strong> Parse DDL or introspect a live catalog into a Schema AST — one typed PureScript value that is the single source of truth.</li>
+        <li><strong>Generate.</strong> Emit an Alloy <code>.als</code> model: tables become signatures, foreign keys become relations, constraints become facts. The structural-validity facts are kept separate from the one property under test.</li>
+        <li><strong>Verify.</strong> Run Alloy's SAT solver. Either "no counterexample within scope ≤ N" or a concrete witness — minimized to the smallest scope that still breaks.</li>
+        <li><strong>Show.</strong> Render the result with Hylograph: topology graphs, migration timelines, usage heatmaps — operate directly on the structure, not a report about it.</li>
+      </ol>
+      <p class="scope-note">
+        Alloy checks within a bounded scope, and Notothenia is honest about
+        it: results read "verified for all instances with ≤&nbsp;N rows per
+        table" — the small-scope hypothesis, the same empirical bet
+        SmallCheck makes.
+      </p>
+    </section>
+
+    <section class="band proofs">
+      <h2>The proof catalog</h2>
+      <div class="proof-grid">
+        <div><h4>BCNF / 3NF</h4><p>Every non-trivial FD has a superkey determinant — or here's the one that doesn't.</p></div>
+        <div><h4>FK acyclicity</h4><p>No cycle in the foreign-key graph — or the exact path A&nbsp;→&nbsp;B&nbsp;→&nbsp;A.</p></div>
+        <div><h4>RI across migrations</h4><p>Referential integrity holds at every step of a migration trace.</p></div>
+        <div><h4>Dead columns</h4><p>Columns no query in the codebase references.</p></div>
+        <div><h4>Lossless join</h4><p>A decomposition rejoins to the original — no spurious tuples.</p></div>
+        <div><h4>Type widening</h4><p>A column's new type subsumes the old domain.</p></div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p class="codd">&ldquo;Cod with only one &rsquo;d&rsquo;.&rdquo; — a tribute to E.&nbsp;F.&nbsp;Codd.</p>
+      <p class="meta">
+        Notothenia is part of the <strong>Hylograph</strong> tool family.
+        Built in PureScript; Alloy&nbsp;6 verification backend; DuckDB and
+        PostgreSQL.
+      </p>
+      <p class="meta status">Preliminary — under active development.</p>
+    </div>
+  </footer>
+
+</body>
+</html>
