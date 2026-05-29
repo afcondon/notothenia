@@ -4,6 +4,11 @@
 > sketch that was originally developed in a planning session
 > (`~/.claude/plans/idempotent-whistling-crayon.md`). Future updates
 > belong here, in the repo, not in that ephemeral file.
+>
+> **See also `docs/SYNTHESIS.md`** — the white paper on intellectual
+> lineage (Cunha-Pacheco / Alloy / the QuickCheck family), the
+> schema-as-types thesis, the rowtype-yoga fusion, and the extension
+> ladder. DESIGN.md is the per-phase build log; SYNTHESIS.md is the why.
 
 ## Status (2026-05-28)
 
