@@ -292,6 +292,16 @@ Each rung is concrete. The Schema AST is the pivot between value-world
    Fidelity gaps confirmed exactly as predicted (literal-vs-expression
    defaults recovered heuristically; composite uniques dropped; bigint/
    decimal lossy).
+   **STATUS (2026-05-29): reverse half also DONE (5b).**
+   `MinardDB.Codegen.YogaParse` parses `Table` decls → `Schema`;
+   `MinardDB.Schema.Diff` does a structural drift diff (with
+   `pgTypeEquiv` ignoring the lossy collapses + default-text). Round-trip
+   on Marginalia = 0 drift; a stale binding caught with exactly the
+   injected drifts. The round-trip found a real forward-gen bug
+   (Nullable suppressed on defaulted columns — nullable and Default are
+   orthogonal), now fixed. **Rung 1 is complete.** Drift detection is a
+   real feature now: parse an app's hand-written `Table` bindings, diff
+   against the introspected catalog, get the disagreements.
 
 2. **Alloy proves, on the yoga types, what types can't say.** Derive a
    `Schema` from someone's `Table` declarations, run the proof catalog —

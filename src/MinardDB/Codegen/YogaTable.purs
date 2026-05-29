@@ -104,10 +104,6 @@ classifyDefault = case _ of
       || Array.elem s
           [ "current_timestamp", "now", "current_date", "current_time" ]
 
-isNoDefault :: DefaultKind -> Boolean
-isNoDefault NoDefault = true
-isNoDefault _ = false
-
 isAutoInc :: DefaultKind -> Boolean
 isAutoInc AutoInc = true
 isAutoInc _ = false
@@ -131,9 +127,14 @@ columnType t col =
     dk = classifyDefault col.defaultExpr
     isUnique = Array.any (\uc -> uc.columns == [ col.name ]) t.uniqueConstraints
     mFK = Array.find (\fk -> fk.columns == [ col.name ]) t.foreignKeys
-    -- A PK column is never emitted as Nullable; a column with a default
-    -- is effectively non-null on insert, so we don't mark it Nullable.
-    nullable = col.nullable && not isPK && isNoDefault dk
+    -- Nullability and defaultedness are ORTHOGONAL (a column can be both
+    -- nullable and have a default — e.g. `created_at TIMESTAMP DEFAULT
+    -- current_timestamp` with no NOT NULL). yoga's `Nullable` (holds
+    -- NULL) and `Default`/`DefaultExpr` (optional on insert) say
+    -- different things, so emit both when both apply. Only a PK is never
+    -- Nullable. (Conflating these was a real bug the 5b round-trip
+    -- caught.)
+    nullable = col.nullable && not isPK
 
     -- innermost → outermost, applied by `wrap`
     wrappers =
@@ -232,8 +233,7 @@ emitModule moduleName schema =
         <> (if Array.any (\fk -> fk.columns == [ col.name ]) t.foreignKeys then [ "ForeignKey", "References" ] else [])
 
   needsNullable t col =
-    let dk = classifyDefault col.defaultExpr
-    in col.nullable && not (Array.elem col.name t.primaryKey) && isNoDefault dk
+    col.nullable && not (Array.elem col.name t.primaryKey)
 
   baseImportLines =
     String.joinWith "\n"

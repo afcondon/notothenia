@@ -23,14 +23,14 @@ type ProjectsTable = Table "projects"
   , cover_attachment_id :: Nullable Int
   , blog_status :: Nullable String
   , blog_content :: Nullable String
-  , created_at :: DefaultExpr "current_timestamp" DateTime
-  , updated_at :: DefaultExpr "current_timestamp" DateTime
+  , created_at :: DefaultExpr "current_timestamp" (Nullable DateTime)
+  , updated_at :: DefaultExpr "current_timestamp" (Nullable DateTime)
   )
 
 type DependenciesTable = Table "dependencies"
   ( blocker_id :: PrimaryKey Int
   , blocked_id :: PrimaryKey Int
-  , dependency_type :: Default "blocks" String
+  , dependency_type :: Default "blocks" (Nullable String)
   )
 
 type TagsTable = Table "tags"
@@ -49,7 +49,7 @@ type ProjectNotesTable = Table "project_notes"
   , content :: String
   , author :: Default "human" String
   , session_id :: Nullable String
-  , created_at :: DefaultExpr "current_timestamp" DateTime
+  , created_at :: DefaultExpr "current_timestamp" (Nullable DateTime)
   )
 
 type StatusHistoryTable = Table "status_history"
@@ -57,7 +57,7 @@ type StatusHistoryTable = Table "status_history"
   , project_id :: Int
   , old_status :: Nullable String
   , new_status :: String
-  , changed_at :: DefaultExpr "current_timestamp" DateTime
+  , changed_at :: DefaultExpr "current_timestamp" (Nullable DateTime)
   , reason :: Nullable String
   , author :: Default "human" String
   , session_id :: Nullable String
@@ -70,7 +70,7 @@ type AgentSessionsTable = Table "agent_sessions"
   , agent_name :: Nullable String
   , team_name :: Nullable String
   , status :: Default "running" String
-  , started_at :: DefaultExpr "current_timestamp" DateTime
+  , started_at :: DefaultExpr "current_timestamp" (Nullable DateTime)
   , ended_at :: Nullable DateTime
   , summary :: Nullable String
   , worktree_path :: Nullable String
@@ -85,7 +85,7 @@ type AttachmentsTable = Table "attachments"
   , content :: Nullable Foreign
   , file_path :: Nullable String
   , description :: Nullable String
-  , created_at :: DefaultExpr "current_timestamp" DateTime
+  , created_at :: DefaultExpr "current_timestamp" (Nullable DateTime)
   )
 
 type ProjectIssuesTable = Table "project_issues"
@@ -100,7 +100,7 @@ type ProjectIssuesTable = Table "project_issues"
   , labels :: Nullable String
   , created_at :: Nullable DateTime
   , updated_at :: Nullable DateTime
-  , synced_at :: DefaultExpr "current_timestamp" DateTime
+  , synced_at :: DefaultExpr "current_timestamp" (Nullable DateTime)
   )
 
 type ProjectServersTable = Table "project_servers"
@@ -115,7 +115,7 @@ type ProjectServersTable = Table "project_servers"
   , prerequisites :: Nullable String
   , host :: Nullable String
   , tailscale_name :: Nullable String
-  , created_at :: DefaultExpr "current_timestamp" DateTime
+  , created_at :: DefaultExpr "current_timestamp" (Nullable DateTime)
   )
 
 type SubscriptionsTable = Table "subscriptions"
@@ -126,13 +126,13 @@ type SubscriptionsTable = Table "subscriptions"
   , currency :: Default "EUR" String
   , frequency :: Default "monthly" String
   , next_due :: Nullable PGDate
-  , auto_renew :: Default "true" Boolean
+  , auto_renew :: Default "true" (Nullable Boolean)
   , cancel_url :: Nullable String
   , notes :: Nullable String
   , project_id :: Nullable Int
-  , active :: Default "true" Boolean
-  , created_at :: DefaultExpr "current_timestamp" DateTime
-  , updated_at :: DefaultExpr "current_timestamp" DateTime
+  , active :: Default "true" (Nullable Boolean)
+  , created_at :: DefaultExpr "current_timestamp" (Nullable DateTime)
+  , updated_at :: DefaultExpr "current_timestamp" (Nullable DateTime)
   )
 
 type ExerciseLogTable = Table "exercise_log"
@@ -143,8 +143,8 @@ type ExerciseLogTable = Table "exercise_log"
   , distance :: Nullable Number
   , calories :: Nullable Int
   , notes :: Nullable String
-  , source :: Default "manual" String
-  , created_at :: DefaultExpr "current_timestamp" DateTime
+  , source :: Default "manual" (Nullable String)
+  , created_at :: DefaultExpr "current_timestamp" (Nullable DateTime)
   )
 
 type DeploymentsTable = Table "deployments"
@@ -159,8 +159,8 @@ type DeploymentsTable = Table "deployments"
   , last_deployed_at :: Nullable DateTime
   , last_deploy_status :: Nullable String
   , description :: Nullable String
-  , created_at :: DefaultExpr "current_timestamp" DateTime
-  , updated_at :: DefaultExpr "current_timestamp" DateTime
+  , created_at :: DefaultExpr "current_timestamp" (Nullable DateTime)
+  , updated_at :: DefaultExpr "current_timestamp" (Nullable DateTime)
   )
 
 type MetadataTable = Table "metadata"

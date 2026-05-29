@@ -330,9 +330,26 @@ member it actually is.
   `PGBigInt`→`Int`, `PGDecimal`→`Number` are lossy; FK `ON DELETE`
   actions are dropped (they belong to Alloy's migration model, not the
   query-conformance type).
-- **5b (reverse: parse `Table` decls → Schema, diff vs catalog)** —
-  next. Needs a small PureScript type-declaration parser; enables
-  drift detection.
+- **5b (reverse bridge + drift detection)** — done.
+  `MinardDB.Codegen.YogaParse` parses `type X = Table "name" ( … )`
+  declarations back into a notothenia `Schema` (scans a module,
+  ignoring imports/comments; parses the wrapper chain back to
+  PGType + flags; reuses the shared `SQL.Lexer`).
+  `MinardDB.Schema.Diff` does a *structural* diff (tables/columns
+  added-or-removed, type/nullability/PK changes), with `pgTypeEquiv`
+  treating the representation-collapse classes (`Text`≈`Varchar`,
+  `Int`≈`BigInt`) as equal and ignoring default-expr text, so the
+  known-lossy mappings never read as drift. `MinardDB.Codegen.RoundTrip`
+  proves the loop: Marginalia schema → emit → parse-back → diff =
+  **0 differences** (faithful inverse), and a deliberately-stale
+  hand-written binding (a column dropped, `status` retyped to Int) is
+  caught as **exactly 2** drifts.
+  The round-trip earned its keep: it caught a real bug in the *forward*
+  generator — `Nullable` was being suppressed on any defaulted column,
+  conflating two orthogonal properties (nullable = holds NULL;
+  Default = optional on insert). Fixed to emit both
+  (`DefaultExpr "current_timestamp" (Nullable DateTime)`), re-validated
+  against real yoga.
 - **5c+ (Alloy-on-yoga-types; compile-time reach/dead-columns via a
   query manifest; migration-breaks-a-query as a type error)** — the
   extension ladder rungs 2–4. See `docs/SYNTHESIS.md`.
