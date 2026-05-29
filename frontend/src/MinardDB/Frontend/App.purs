@@ -21,6 +21,7 @@ import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
+import MinardDB.Frontend.Timeline (MigrationReport, parseReports, timelineList, timelineView)
 import MinardDB.Frontend.Topology (SchemaData, parseSchemaData, topologyView)
 import Web.HTML (window)
 import Web.HTML.Location (hash, setHash)
@@ -73,10 +74,13 @@ data View
   | DetailView Detail
   | LoadingDetail Int
   | ErrorView String
+  | MigrationListView
+  | MigrationDetailView MigrationReport
 
 type State =
   { view :: View
   , analyses :: Array Summary
+  , migrations :: Array MigrationReport
   , loading :: Boolean
   , error :: Maybe String
   }
@@ -86,6 +90,9 @@ data Action
   | SelectAnalysis Int
   | BackToList
   | Refresh
+  | GoAnalyses
+  | GoMigrations
+  | SelectMigration String
 
 component :: forall q i o m. MonadAff m => H.Component q i o m
 component =
@@ -102,6 +109,7 @@ initialState :: State
 initialState =
   { view: ListView
   , analyses: []
+  , migrations: []
   , loading: true
   , error: Nothing
   }
@@ -110,18 +118,33 @@ handleAction :: forall o m. MonadAff m => Action -> H.HalogenM State Action () o
 handleAction = case _ of
   Initialize -> do
     loadList
-    -- Hash-deep-link: `#42` on load drops the user straight into the
-    -- analysis detail. Reload-survival + shareable URLs.
+    loadMigrations
+    -- Hash-deep-link on load. Routes:
+    --   #m/<name> → that migration's timeline
+    --   #m        → migration list
+    --   #<int>    → that analysis's detail
+    --   (empty)   → analysis list
+    -- Reload-survival + shareable URLs.
     h <- liftEffect readHash
-    case parseHashId h of
-      Just id -> selectAnalysis id
-      Nothing -> pure unit
+    case parseRoute h of
+      RouteMigration name -> showMigration name
+      RouteMigrationList -> H.modify_ _ { view = MigrationListView }
+      RouteAnalysis id -> selectAnalysis id
+      RouteAnalysisList -> pure unit
   Refresh -> loadList
   BackToList -> do
     liftEffect (writeHash "")
     H.modify_ _ { view = ListView }
     loadList
   SelectAnalysis id -> selectAnalysis id
+  GoAnalyses -> do
+    liftEffect (writeHash "")
+    H.modify_ _ { view = ListView }
+  GoMigrations -> do
+    liftEffect (writeHash "#m")
+    loadMigrations
+    H.modify_ _ { view = MigrationListView }
+  SelectMigration name -> showMigration name
   where
     loadList = do
       H.modify_ _ { loading = true, error = Nothing }
@@ -131,6 +154,14 @@ handleAction = case _ of
         Right r -> case jsonParser r.body >>= parseList of
           Left err -> H.modify_ _ { loading = false, error = Just err }
           Right xs -> H.modify_ _ { loading = false, analyses = xs }
+
+    loadMigrations = do
+      resp <- H.liftAff $ AX.get RF.string (apiBase <> "/api/migrations")
+      case resp of
+        Left _ -> pure unit
+        Right r -> case jsonParser r.body >>= parseReports of
+          Left _ -> pure unit
+          Right xs -> H.modify_ _ { migrations = xs }
 
     selectAnalysis id = do
       liftEffect (writeHash ("#" <> show id))
@@ -143,39 +174,94 @@ handleAction = case _ of
           Left err -> H.modify_ _ { view = ErrorView err }
           Right d -> H.modify_ _ { view = DetailView d }
 
--- | Hash routing helpers: a single Int after `#` selects an analysis.
+    -- The migration list is loaded in full (steps included), so a
+    -- deep-link just selects from the in-memory array. If it isn't
+    -- loaded yet (cold deep-link), fetch it first, then select.
+    showMigration name = do
+      liftEffect (writeHash ("#m/" <> name))
+      st <- H.get
+      case Array.find (\r -> r.name == name) st.migrations of
+        Just r -> H.modify_ _ { view = MigrationDetailView r }
+        Nothing -> do
+          loadMigrations
+          st' <- H.get
+          case Array.find (\r -> r.name == name) st'.migrations of
+            Just r -> H.modify_ _ { view = MigrationDetailView r }
+            Nothing -> H.modify_ _ { view = MigrationListView }
+
+-- | Hash routing.
+data Route
+  = RouteAnalysisList
+  | RouteAnalysis Int
+  | RouteMigrationList
+  | RouteMigration String
+
 readHash :: Effect String
 readHash = window >>= location >>= hash
 
 writeHash :: String -> Effect Unit
 writeHash h = window >>= location >>= setHash h
 
-parseHashId :: String -> Maybe Int
-parseHashId h =
-  String.stripPrefix (String.Pattern "#") h
-    >>= Int.fromString
+parseRoute :: String -> Route
+parseRoute h = case String.stripPrefix (String.Pattern "#") h of
+  Nothing -> RouteAnalysisList
+  Just "" -> RouteAnalysisList
+  Just rest -> case String.stripPrefix (String.Pattern "m/") rest of
+    Just name | name /= "" -> RouteMigration name
+    _ ->
+      if rest == "m" then RouteMigrationList
+      else case Int.fromString rest of
+        Just id -> RouteAnalysis id
+        Nothing -> RouteAnalysisList
 
 -- Render ---
 
 render :: forall m. State -> H.ComponentHTML Action () m
 render state =
   HH.div [ HP.class_ (HH.ClassName "app") ]
-    [ header
+    [ header state.view
     , case state.view of
         ListView -> renderList state
         LoadingDetail _ -> HH.div [ HP.class_ (HH.ClassName "loading") ] [ HH.text "Loading…" ]
         DetailView d -> renderDetail d
         ErrorView err -> HH.div [ HP.class_ (HH.ClassName "error") ] [ HH.text err ]
+        MigrationListView -> timelineList state.migrations SelectMigration
+        MigrationDetailView r -> timelineView r GoMigrations
     , footer
     ]
 
-header :: forall a. HH.HTML a Action
-header =
+header :: forall a. View -> HH.HTML a Action
+header view =
   HH.header [ HP.class_ (HH.ClassName "site-header") ]
     [ HH.h1_ [ HH.text "Notothenia" ]
     , HH.p [ HP.class_ (HH.ClassName "subtitle") ]
         [ HH.text "Minard-DB · schema cartography with Alloy-backed proofs" ]
+    , HH.nav [ HP.class_ (HH.ClassName "site-nav") ]
+        [ HH.a
+            [ HP.class_ (HH.ClassName (navClass (isAnalysisView view)))
+            , HP.href "#"
+            , HE.onClick (\_ -> GoAnalyses)
+            ]
+            [ HH.text "Analyses" ]
+        , HH.a
+            [ HP.class_ (HH.ClassName (navClass (isMigrationView view)))
+            , HP.href "#m"
+            , HE.onClick (\_ -> GoMigrations)
+            ]
+            [ HH.text "Migrations" ]
+        ]
     ]
+  where
+  navClass active = "nav-link" <> (if active then " active" else "")
+
+isMigrationView :: View -> Boolean
+isMigrationView = case _ of
+  MigrationListView -> true
+  MigrationDetailView _ -> true
+  _ -> false
+
+isAnalysisView :: View -> Boolean
+isAnalysisView v = not (isMigrationView v)
 
 footer :: forall a. HH.HTML a Action
 footer =

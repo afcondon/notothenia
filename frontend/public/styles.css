@@ -470,3 +470,194 @@ td code, .source-path code {
   font-size: 0.85rem;
   font-style: italic;
 }
+
+/* Top nav (Analyses / Migrations) ------------------------------------- */
+
+.site-nav {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: #999;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding-bottom: 0.25rem;
+  border-bottom: 2px solid transparent;
+}
+
+.nav-link:hover { color: #1a1a1a; }
+
+.nav-link.active {
+  color: #1a1a1a;
+  border-bottom-color: #1a1a1a;
+}
+
+/* Verdict badges ------------------------------------------------------- */
+
+.verdict-badges {
+  display: flex;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+  flex-wrap: wrap;
+}
+
+.verdict-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 0.8rem;
+}
+
+.verdict-badges-lg .verdict-badge { font-size: 0.95rem; padding: 0.4rem 0.8rem; }
+
+.verdict-badge .vb-label { color: #888; text-transform: lowercase; }
+.verdict-badge .vb-value { font-weight: 700; letter-spacing: 0.02em; }
+
+.verdict-badge.ok .vb-value { color: #2e7d32; }
+.verdict-badge.broken .vb-value { color: #c62828; }
+.verdict-badge.neutral .vb-value { color: #666; }
+
+.verdict-badge.ok { border-color: #c8e6c9; background: #f4faf4; }
+.verdict-badge.broken { border-color: #ffcdd2; background: #fdf5f5; }
+
+/* Transit callout ------------------------------------------------------ */
+
+.transit-callout {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  border-left: 4px solid #c62828;
+  background: #fdf5f5;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  border-radius: 0 4px 4px 0;
+}
+
+.transit-callout.clean { border-left-color: #2e7d32; background: #f4faf4; }
+.transit-callout.broken { border-left-color: #c62828; background: #fdf5f5; }
+
+.transit-callout code {
+  background: #ececec;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+
+/* Vertical migration timeline ------------------------------------------ */
+
+.timeline {
+  list-style: none;
+  margin: 1.5rem 0 0;
+  padding: 0;
+}
+
+.tl-step {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 1rem;
+}
+
+/* The rail: a vertical line down the left, with a dot per step. The line
+   is drawn on the rail cell; ::before above the dot, ::after below, so
+   consecutive steps form a continuous track. */
+.tl-rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.tl-rail::before,
+.tl-rail::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+  background: #ddd;
+}
+
+.tl-rail::before { top: 0; height: 14px; }
+.tl-rail::after { top: 14px; bottom: 0; }
+
+.tl-step:first-child .tl-rail::before { background: transparent; }
+.tl-step:last-child .tl-rail::after { background: transparent; }
+
+.tl-dot {
+  position: relative;
+  z-index: 1;
+  width: 14px;
+  height: 14px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: #2e7d32;
+  border: 2px solid #fafafa;
+}
+
+.tl-step.broken .tl-dot { background: #c62828; }
+
+/* Tint the rail segment leading into and out of a broken step red, so
+   the "in transit" interval reads as a red stretch of track. */
+.tl-step.broken .tl-rail::before,
+.tl-step.broken .tl-rail::after { background: #e8a0a0; }
+
+.tl-body {
+  padding-bottom: 1.5rem;
+  min-width: 0;
+}
+
+.tl-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.tl-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: #f0f0f0;
+  color: #666;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.tl-desc {
+  font-size: 0.95rem;
+  background: #f5f5f5;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+}
+
+.tl-standing {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #c62828;
+  background: #fdecea;
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.tl-issues {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.tl-issues li { margin-top: 0.2rem; }
+.tl-issues.introduced li { color: #c62828; }
+.tl-issues.resolved li { color: #2e7d32; }

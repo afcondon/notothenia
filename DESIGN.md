@@ -186,9 +186,28 @@ member it actually is.
   this length — it was a hardcoded `1..20` that silently
   truncated any history longer than ~9 migrations; it now
   derives from the trace length (`2·nSteps + 1`).
-- **3e (migration timeline UI)** — the 3d field test is the
-  "real use case in the wild" this was gated on. Unblocked;
-  next up when the UI work resumes.
+- **3e (migration timeline UI)** — done. Mirrors the existing
+  precompute → store → serve → render pattern.
+  `MinardDB.Migration.Report` runs each fixture (safe,
+  unsafe-t, unsafe-c, registry-dev) through the static safety
+  pass + Alloy offline and writes a compact JSON report to
+  `reports/<name>.json` (Alloy is too slow to run per HTTP
+  request). Each report carries the ordered steps with a
+  per-step `standingAfter` count (running # of dangling FKs),
+  the two Alloy verdicts, and the headline totals. The backend
+  serves them at `/api/migrations` (one endpoint, full objects;
+  N is tiny so the frontend selects detail from the in-memory
+  list). `MinardDB.Frontend.Timeline` renders a vertical
+  timeline: a left rail with one dot per step, green when RI
+  holds after that step and red when it doesn't, and the rail
+  segment around a broken step tinted red so the "in transit"
+  interval reads as a red stretch of track. A "Broken in
+  transit" callout fires when the sequence ends clean
+  (`finalStandingCount == 0`) but some step spiked — the
+  registry-dev report is exactly that: dots `[0,0,1,0,0,…]`,
+  red only at step 3 (`DROP TABLE jobs`). Top-level nav
+  (Analyses | Migrations) with hash routing (`#m`, `#m/<name>`)
+  alongside the existing analysis routes (`#<int>`).
 
 **Note: Data Model section below has drifted.** The plan originally
 described a shared `minard_db_*` namespace inside Minard's DuckDB.

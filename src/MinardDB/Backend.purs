@@ -4,11 +4,14 @@ import Prelude
 
 import Data.Argonaut.Core (Json, stringify)
 import Data.Argonaut.Core as J
+import Data.Argonaut.Parser (jsonParser)
 import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
 import Data.Int as Int
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), isJust)
+import Data.String (Pattern(..), stripSuffix)
+import Data.Traversable (traverse)
 import Data.Tuple.Nested ((/\))
 import Effect.Aff (Aff, attempt)
 import Effect.Aff.Class (liftAff)
@@ -20,6 +23,7 @@ import MinardDB.Schema (FKAction, ForeignKey, Schema, Table)
 import MinardDB.Schema.JSON (parseSchemaFull)
 import Node.Encoding (Encoding(..))
 import Node.FS.Aff as FS
+import Node.Path as Path
 import Routing.Duplex (RouteDuplex', int, path, root, segment)
 import Routing.Duplex.Generic (noArgs, sum)
 
@@ -27,15 +31,23 @@ data Route
   = Health
   | ListAnalyses
   | GetAnalysis Int
+  | ListMigrations
 
 derive instance genericRoute :: Generic Route _
 
 routes :: RouteDuplex' Route
 routes = root $ sum
-  { "Health":       path "health" noArgs
-  , "ListAnalyses": path "api" (path "analyses" noArgs)
-  , "GetAnalysis":  path "api" (path "analyses" (int segment))
+  { "Health":         path "health" noArgs
+  , "ListAnalyses":   path "api" (path "analyses" noArgs)
+  , "GetAnalysis":    path "api" (path "analyses" (int segment))
+  , "ListMigrations": path "api" (path "migrations" noArgs)
   }
+
+-- | Where the migration-report generator (`MinardDB.Migration.Report`)
+-- | writes its JSON. Relative to the backend's cwd — launch the server
+-- | from the package root, the same place the generator runs.
+reportsDir :: String
+reportsDir = "reports"
 
 corsHeaders :: ResponseHeaders
 corsHeaders = headers
@@ -68,6 +80,31 @@ main = serve { port: 3080, hostname: "localhost" } { route: routes, router }
         Right (Just detail) -> do
           mschema <- liftAff $ tryReadSchema detail.summary.sourcePath
           ok' corsHeaders (stringify (encodeDetail detail mschema))
+
+    handle ListMigrations = do
+      reports <- liftAff readAllReports
+      ok' corsHeaders (stringify (J.fromObject (Object.singleton "migrations" (J.fromArray reports))))
+
+-- | Read every `*.json` migration report from `reportsDir` and return
+-- | the parsed objects. A missing directory yields an empty list (the
+-- | generator just hasn't been run yet), not an error; an individual
+-- | unreadable/unparseable file is skipped rather than failing the
+-- | whole request.
+readAllReports :: Aff (Array Json)
+readAllReports =
+  attempt (FS.readdir reportsDir) >>= case _ of
+    Left _ -> pure []
+    Right names -> do
+      let jsonNames = Array.filter (\n -> isJust (stripSuffix (Pattern ".json") n)) names
+      parsed <- traverse readOne (Array.sort jsonNames)
+      pure (Array.catMaybes parsed)
+  where
+  readOne name =
+    attempt (FS.readTextFile UTF8 (Path.concat [ reportsDir, name ])) >>= case _ of
+      Left _ -> pure Nothing
+      Right text -> case jsonParser text of
+        Left _ -> pure Nothing
+        Right j -> pure (Just j)
 
 -- JSON encoders --------------------------------------------------------------
 
