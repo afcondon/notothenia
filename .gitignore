@@ -11,6 +11,7 @@ denormalized-fixture/
 tmp-minimize-*/
 migration-*/
 yoga-*/
+notothenia-check/
 minimal-row-debug/
 vendor/smoke/
 

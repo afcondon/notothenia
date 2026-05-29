@@ -374,6 +374,31 @@ member it actually is.
   migration-breaks-a-query as a type error)** — the extension ladder
   rungs 3–4. See `docs/SYNTHESIS.md`.
 
+**`check` verdict/CLI surface — done (2026-05-29).** `MinardDB.Check`
+is the agent-runnable front door: `(--sql FILE | --yoga FILE)
+[--against-yoga FILE] [--alloy] [--json]`, exit 0 clean / 1 findings /
+2 usage-or-IO-or-tool error. Every check is re-derivable from the repo
+alone (no conversational context) — the fog-of-war design constraint
+from the linter-at-pace vision (see memory `project_linting_engine_vision`).
+Two tiers:
+- **Fast (pure PS, no JVM, every-edit cheap):** `fk-targets-exist`
+  (dangling/rename rot), `fk-acyclicity` (pure table-graph cycle
+  detection, honestly distinguishing a hard all-NOT-NULL cycle =
+  *error, unpopulatable* from a nullable cycle = *warning, run --alloy
+  to settle*), `primary-keys`, and `drift` vs `--against-yoga` typed
+  bindings (reuses `Schema.Diff`).
+- **Audit (`--alloy`):** the `MinardDB.Properties` catalog via the
+  existing Generate→Invoke→Receipt pipeline, plus satisfiability from
+  the `show` run (the run-vs-check dual). Mapped to findings via the
+  catalog's `CheckBody` + `interpretCommand`.
+Validated on fixtures: clean DAG PASS; hard cycle and dangling FK FAIL
+(fast); a `parent_id` tree warns fast then Alloy *correctly* finds the
+self-parent row-cycle (`--alloy` resolves the hedge in the strict
+direction — the schema has no CHECK forbidding `parent_id = id`); drift
+catches a `String→Int` column retype at the exact column; real
+Marginalia DDL + generated yoga bindings both PASS clean (FKs disabled
+→ nothing to flag).
+
 **Note: Data Model section below has drifted.** The plan originally
 described a shared `minard_db_*` namespace inside Minard's DuckDB.
 Implementation diverged: notothenia owns `database/notothenia.duckdb`
