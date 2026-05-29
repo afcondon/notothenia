@@ -35,6 +35,7 @@
 module MinardDB.Migration.SQL
   ( parseSql
   , dbmateUp
+  , schemaFromSql
   ) where
 
 import Prelude hiding (between)
@@ -47,12 +48,12 @@ import Data.String (Pattern(..))
 import Data.String as String
 import Data.String.CodeUnits (fromCharArray)
 import Data.String.Common (toLower)
-import MinardDB.Migration (Migration(..), MigrationSequence)
+import MinardDB.Migration (Migration(..), MigrationSequence, applyMigration)
 import MinardDB.SQL.Lexer (identifierWith, integer, isAsciiDigit, keyword, keywords, lexeme, parens, rawWord, skipFiller, symbol)
-import MinardDB.Schema (Column, FKAction(..), ForeignKey, PGType(..), Table)
+import MinardDB.Schema (Column, FKAction(..), ForeignKey, PGType(..), Schema, Table)
 import Parsing (Parser, fail, parseErrorMessage, runParser)
-import Parsing.Combinators (choice, lookAhead, option, optionMaybe, sepBy1, try)
-import Parsing.String (char, eof, satisfy)
+import Parsing.Combinators (choice, lookAhead, manyTill, option, optionMaybe, sepBy1, try)
+import Parsing.String (anyChar, char, eof, satisfy)
 
 -- | Top-level entry. Parses a multi-statement script; returns the
 -- | sequence of migrations or the first parse error.
@@ -60,6 +61,31 @@ parseSql :: String -> Either String MigrationSequence
 parseSql src = case runParser src topLevel of
   Left err -> Left (parseErrorMessage err)
   Right ms -> Right ms
+
+-- | Parse a `.sql` schema dump into a `Schema` by parsing the DDL into
+-- | a migration sequence (CREATE TABLE + ALTER TABLE ADD COLUMN; other
+-- | statements are skipped by `topLevel`) and replaying it onto an
+-- | empty schema. The empty schema's `name` is supplied by the caller.
+-- |
+-- | The replay is *tolerant*: a step that errors (a `CREATE TABLE IF
+-- | NOT EXISTS` for a table already present, an `ADD COLUMN IF NOT
+-- | EXISTS` for a column the CREATE already declared — both common in
+-- | idempotent real-world dumps) is skipped rather than aborting. A
+-- | schema dump is "ensure this exists" DDL, so every statement is
+-- | effectively idempotent; strict sequencing is for migration
+-- | *verification*, not schema ingestion.
+-- |
+-- | This is how reach analysis ingests a real schema: point it at the
+-- | project's `schema.sql` and get back the `Schema` the queries are
+-- | resolved against.
+schemaFromSql :: String -> String -> Either String Schema
+schemaFromSql name src = do
+  ms <- parseSql src
+  pure (Array.foldl applyTolerant { name, tables: [] } ms)
+  where
+  applyTolerant schema m = case applyMigration m schema of
+    Left _ -> schema
+    Right next -> next
 
 -- | Extract the forward (`up`) section from a dbmate-style migration
 -- | file. dbmate (and several other migration tools) put both the
@@ -99,10 +125,14 @@ identifier = identifierWith isReserved
 -- | Reserved words the DDL grammar uses syntactically. Quoted
 -- | identifiers bypass this list, so a table literally called `"order"`
 -- | still parses.
+-- | NB: `key` is deliberately NOT here — it's a common column name
+-- | (`metadata.key`), and the `keyword` parser matches `PRIMARY KEY` /
+-- | `FOREIGN KEY` without consulting this list, so reserving it only
+-- | blocks legitimate identifiers.
 isReserved :: String -> Boolean
 isReserved w = Array.elem w
   [ "add", "alter", "cascade", "column", "constraint", "create"
-  , "default", "delete", "drop", "exists", "foreign", "if", "key"
+  , "default", "delete", "drop", "exists", "foreign", "if"
   , "no", "not", "null", "on", "primary", "references", "restrict"
   , "set", "table", "unique", "update"
   ]
@@ -143,6 +173,13 @@ pgType = choice $ map try
   , keyword "uuid" *> pure PGUUID
   , keyword "jsonb" *> pure PGJsonb
   , keyword "json" *> pure PGJsonb
+  , do
+      keyword "decimal" <|> keyword "numeric"
+      -- optional (precision, scale) — consumed, not retained
+      _ <- option [] (try (parens (sepBy1 integer (symbol ",") <#> Array.fromFoldable)))
+      pure PGDecimal
+  , keyword "blob" *> pure PGBlob
+  , keyword "bytea" *> pure PGBlob
   ]
 
 fkAction :: Parser String FKAction
@@ -308,8 +345,10 @@ columnModifier = choice $ map try
   ]
 
 -- | A token of a default expression: string literal, numeric literal,
--- | or bare identifier/keyword (CURRENT_TIMESTAMP, NULL, true). We
--- | store the surface text; downstream we don't interpret it.
+-- | or a bareword optionally followed by a call argument list
+-- | (`current_timestamp`, `true`, `nextval('seq_projects')`). We store
+-- | the surface text; downstream we don't interpret it — we only need to
+-- | *consume* it so the column definition parses.
 defaultLiteral :: Parser String String
 defaultLiteral = lexeme $ choice $ map try
   [ do
@@ -320,8 +359,20 @@ defaultLiteral = lexeme $ choice $ map try
   , do
       ds <- Array.some (try (satisfy isAsciiDigit))
       pure (fromCharArray ds)
-  , rawWord
+  , do
+      w <- rawWord
+      -- Optional call args, e.g. nextval('seq_projects'). One level of
+      -- parens, contents opaque — enough for the function-call defaults
+      -- that appear in real schema dumps.
+      args <- option "" parenChunk
+      pure (w <> args)
   ]
+  where
+  parenChunk = do
+    _ <- char '('
+    inner <- Array.many (satisfy (_ /= ')'))
+    _ <- char ')'
+    pure ("(" <> fromCharArray inner <> ")")
 
 ------------------------------------------------------------------------
 -- Statement-level
@@ -338,9 +389,22 @@ topLevel = do
     atEnd <- (eof *> pure true) <|> pure false
     if atEnd then pure acc
     else do
-      m <- statement
-      symbol ";"
-      gather (Array.snoc acc m)
+      -- Try a statement we model; if it doesn't parse (CREATE
+      -- SEQUENCE / INDEX / VIEW, INSERT, PRAGMA, or any ALTER form we
+      -- don't handle), skip to the next `;` and carry on. This lets a
+      -- real schema dump through — we ingest the table structure and
+      -- silently drop the rest, rather than failing the whole parse.
+      mStmt <- optionMaybe (try (statement <* symbol ";"))
+      case mStmt of
+        Just m -> gather (Array.snoc acc m)
+        Nothing -> do
+          skipStatement
+          gather acc
+
+  -- Consume everything up to and including the next `;` (or to eof).
+  skipStatement = do
+    _ <- manyTill anyChar (void (char ';') <|> eof)
+    skipFiller
 
 -- | Dispatch on the leading keyword. We `lookAhead` to peek without
 -- | committing; the chosen branch re-parses the keyword for itself.
@@ -446,6 +510,7 @@ alterAdd tName = do
   where
   addColumn t = do
     keyword "column"
+    _ <- optionMaybe (keywords [ "if", "not", "exists" ])
     cdef <- columnDef
     case cdef of
       TIColumn r -> pure (AddColumn t r.col)

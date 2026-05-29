@@ -262,9 +262,44 @@ member it actually is.
   Migrations | Query reach) with hash routes `#r`, `#r/<name>`.
   Chosen design (per the as-built notes): a dedicated grid, not
   columns-in-topology — legibility over FK structure here.
-- **4c (point at real query sources)** — defer. Feed actual
-  application SQL / query logs (e.g. Marginalia's queries) and
-  report its dead columns, the field-test analogue for Phase 4.
+- **4c (real-world field test: Marginalia)** — done. The reach
+  analogue of the registry-dev migration field test.
+  `MinardDB.Query.FieldTest` parses Marginalia's real
+  `database/schema.sql` into a `Schema` (via the new
+  `schemaFromSql`) and harvests SQL string literals — both
+  `"..."` and `"""..."""` — out of the PureScript server source
+  with a regex, feeding each through `parseQuery`. It resolves
+  reach over the whole set and writes `reports/reach-marginalia.json`.
+
+  Real DDL forced parser hardening (the gaps the field test
+  existed to find): function-call DEFAULTs (`nextval('seq')`),
+  `ALTER TABLE ADD COLUMN IF NOT EXISTS`, top-level skipping of
+  statements we don't model (CREATE SEQUENCE/INDEX/VIEW, INSERT —
+  resync to the next `;`), the `DECIMAL`/`NUMERIC(p,s)` and
+  `BLOB`/`BYTEA` types (added `PGDecimal`/`PGBlob` to the AST),
+  and removing `key` from the DDL reserved set (it's a column
+  name in `metadata`, and `PRIMARY KEY` parses without the
+  reserved list). `schemaFromSql` also replays *tolerantly* —
+  an idempotent dump re-declares columns via defensive
+  `ADD COLUMN IF NOT EXISTS`, so a step that errors is skipped
+  rather than aborting ingestion. Result: all 14 tables, 120
+  columns parse.
+
+  The finding: 94/120 columns reached, **26 dead**, dominated
+  by two whole tables — `agent_sessions` and `project_issues`,
+  where only `project_id` is reached. Verified real: the server
+  references those tables *only* via `DELETE FROM … WHERE
+  project_id = …` (cascade-delete on project deletion); they're
+  written/read by other tooling (agent-teams, a GitHub sync
+  script), never SELECTed or INSERTed by the server. So from the
+  server's query surface every other column is genuinely dead.
+  Honest caveat (printed by the runner): the harvester
+  under-reports dynamically-concatenated WHERE fragments that
+  carry no SELECT of their own, and only 10 source files are
+  swept — so "dead" means "unreferenced by the harvested set",
+  a candidate to scrutinise, not a verdict. The reach view
+  renders the full schema as a usage heatmap with `projects.id`
+  hottest (38 references).
 
 **Note: Data Model section below has drifted.** The plan originally
 described a shared `minard_db_*` namespace inside Minard's DuckDB.
@@ -641,6 +676,7 @@ near the top of this file for the as-built notes)
 - Map queries to tables/columns touched ✓ (4a)
 - Dead column detection ✓ (4a)
 - Reach map visualization ✓ (4b — schema usage heatmap grid)
+- Real query sources ✓ (4c — Marginalia field test, 26 dead cols)
 
 ## Test Cases
 

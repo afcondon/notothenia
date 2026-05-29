@@ -36,6 +36,8 @@ data PGType
   | PGDate
   | PGUUID
   | PGJsonb
+  | PGDecimal
+  | PGBlob
 
 derive instance eqPGType :: Eq PGType
 instance showPGType :: Show PGType where
@@ -49,6 +51,8 @@ instance showPGType :: Show PGType where
     PGDate -> "PGDate"
     PGUUID -> "PGUUID"
     PGJsonb -> "PGJsonb"
+    PGDecimal -> "PGDecimal"
+    PGBlob -> "PGBlob"
 
 type ForeignKey =
   { columns :: Array String

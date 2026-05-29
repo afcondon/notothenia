@@ -177,3 +177,5 @@ primSigName = case _ of
   PGDate -> "Prim_DATE"
   PGUUID -> "Prim_UUID"
   PGJsonb -> "Prim_JSONB"
+  PGDecimal -> "Prim_DECIMAL"
+  PGBlob -> "Prim_BLOB"

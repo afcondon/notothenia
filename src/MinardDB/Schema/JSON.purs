@@ -120,6 +120,8 @@ parsePGType = case _ of
   "PGDate" -> Right PGDate
   "PGUUID" -> Right PGUUID
   "PGJsonb" -> Right PGJsonb
+  "PGDecimal" -> Right PGDecimal
+  "PGBlob" -> Right PGBlob
   other -> Left ("unknown PGType: " <> other)
 
 parseFK :: Json -> Either String ForeignKey
