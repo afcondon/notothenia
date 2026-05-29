@@ -62,6 +62,18 @@ over a bounded universe. It's the feature the standard wanted, repriced
 from "check on every transaction forever" to "check once in CI, within
 scope."
 
+This is no longer hypothetical: notothenia ships a declared-intent layer
+(`MinardDB.Intent`, an `.intent` file consumed by `notothenia check
+--intent`). It declares invariants the schema can't encode — an `fk`
+the DDL disabled, a non-key `fd` (the very thing that makes BCNF bite,
+since no catalog stores it), a `unique` — which are merged into the
+schema before checking, plus `waive`s that acknowledge an accepted
+finding (the `parent_id = id` self-parent prevented by app logic) with a
+durable reason. It is `CREATE ASSERTION` as a checkable, in-repo
+artifact rather than a runtime burden — and because the intent file can
+itself rot, the checker flags stale assertions (naming a column that no
+longer exists) and stale waivers (matching no current failure).
+
 ## The one-line situating
 
 The DB enforces the constraints you declared, reactively, against the

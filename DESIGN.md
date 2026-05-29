@@ -399,6 +399,31 @@ catches a `String→Int` column retype at the exact column; real
 Marginalia DDL + generated yoga bindings both PASS clean (FKs disabled
 → nothing to flag).
 
+**Declared-intent / assertion layer — done (2026-05-29).**
+`MinardDB.Intent` + `notothenia check --intent FILE`. The fog-of-war
+fix: intent that escaped the artifact (an FK DuckDB disabled, an FD no
+catalog stores, a "this self-reference is fine" decision) is written
+down durably in an `.intent` file and reasoned about, instead of dying
+at the next context seam. Line-oriented format (reuses `SQL.Lexer`;
+`--`/`#` comments), four directives:
+- `fk a.col -> b.col`, `fd table: x,y -> z`, `unique table(cols)` —
+  declared **structure**, merged into the `Schema` *before* checking so
+  every tier sees it. The `fd` directive is the unlock that finally
+  makes **BCNF non-vacuous on a real schema** (verified:
+  `fd addresses: zip -> city` turns a vacuous BCNF into a fault-localized
+  `BCNF_addresses_zip__city` BROKEN).
+- `waive <check>: <reason>` — downgrades a matching failure to a noted,
+  reason-carrying finding (verified: waiving `NoFKCycle` + `fk-acyclicity`
+  turns the accepted self-parent into a clean PASS). Matching is exact or
+  prefix-to-separator, so `waive BCNF` covers all per-FD `BCNF_*`.
+The intent file can itself rot, so the checker reports **stale
+assertions** (`intent-error`, SevError — a directive naming a missing
+table/column) and **stale waivers** (`intent-stale-waiver`, SevWarning —
+matching no current failure). Runnable example in `examples/blog.{sql,intent}`
+(asserted reply-tree FK + waivers → clean PASS). This realizes the
+`CREATE ASSERTION` slot from `docs/notothenia-vs-db-enforcement.md` as a
+checkable in-repo artifact.
+
 **Note: Data Model section below has drifted.** The plan originally
 described a shared `minard_db_*` namespace inside Minard's DuckDB.
 Implementation diverged: notothenia owns `database/notothenia.duckdb`

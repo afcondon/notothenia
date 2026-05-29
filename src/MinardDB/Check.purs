@@ -70,6 +70,7 @@ import MinardDB.Properties (AlloyCheck, defaultProperties, interpretCommand)
 import MinardDB.Properties (CheckBody(..)) as P
 import MinardDB.Schema (Schema, Table)
 import MinardDB.Schema.Diff (describeDiff, diffSchemas)
+import MinardDB.Intent (Directive, Waiver, applyIntent, intentErrors, matchWaiver, parseIntent, waivers)
 import Node.Encoding (Encoding(..))
 import Node.FS.Aff as FS
 import Node.Path as Path
@@ -437,12 +438,13 @@ findCycle adj = (Array.foldl tryRoot { finished: Set.empty, cycle: Nothing } roo
           else if Set.member nb acc.finished then acc
           else dfs acc.finished path' nb
 
+-- | Right-pad to width `n`, always leaving at least one trailing space so
+-- | an over-long field (e.g. a fault-localized `BCNF_…` check name) still
+-- | separates from the next column.
 padR :: Int -> String -> String
 padR n s =
   let len = String.length s
-  in
-    if len >= n then s
-    else s <> joinWith "" (Array.replicate (n - len) " ")
+  in s <> joinWith "" (Array.replicate (max 1 (n - len)) " ")
 
 ------------------------------------------------------------------------
 -- CLI
@@ -465,10 +467,12 @@ type Opts =
   , alloy :: Boolean
   , json :: Boolean
   , againstYoga :: Maybe String
+  , intent :: Maybe String
   }
 
 defaultOpts :: Opts
-defaultOpts = { source: Nothing, alloy: false, json: false, againstYoga: Nothing }
+defaultOpts =
+  { source: Nothing, alloy: false, json: false, againstYoga: Nothing, intent: Nothing }
 
 parseArgs :: Array String -> Either String Opts
 parseArgs = go defaultOpts
@@ -481,6 +485,7 @@ parseArgs = go defaultOpts
       "--sql" -> withArg a tail \v rest -> go (opts { source = Just (FromSql v) }) rest
       "--yoga" -> withArg a tail \v rest -> go (opts { source = Just (FromYoga v) }) rest
       "--against-yoga" -> withArg a tail \v rest -> go (opts { againstYoga = Just v }) rest
+      "--intent" -> withArg a tail \v rest -> go (opts { intent = Just v }) rest
       other -> Left ("unknown argument: " <> other)
 
   withArg flag tail k = case Array.uncons tail of
@@ -490,9 +495,10 @@ parseArgs = go defaultOpts
 usage :: String
 usage =
   joinWith "\n"
-    [ "usage: notothenia check (--sql FILE | --yoga FILE) [--against-yoga FILE] [--alloy] [--json]"
+    [ "usage: notothenia check (--sql FILE | --yoga FILE) [--intent FILE] [--against-yoga FILE] [--alloy] [--json]"
     , "  --sql FILE           parse a DDL file into a schema"
     , "  --yoga FILE          parse rowtype-yoga Table declarations into a schema"
+    , "  --intent FILE        merge declared intent (fk/fd/unique assertions, waivers) before checking"
     , "  --against-yoga FILE  also check the schema for drift vs these typed bindings"
     , "  --alloy              additionally run the Alloy proof catalog (BCNF, row-level acyclicity, …)"
     , "  --json               emit machine-readable JSON instead of a human report"
@@ -516,7 +522,12 @@ run opts src = do
     Left err -> liftEffect $ die ("notothenia check: cannot read " <> path <> ": " <> Exception.message err)
     Right txt -> case loadSchema src txt of
       Left err -> liftEffect $ die ("notothenia check: parse failed: " <> err)
-      Right schema -> do
+      Right schema0 -> do
+        -- Declared-intent layer: merge fk/fd/unique assertions into the
+        -- schema BEFORE checking, and collect the waivers + any stale
+        -- assertions for later.
+        intent <- loadIntent opts.intent schema0
+        let schema = applyIntent intent.dirs schema0
         drift <- case opts.againstYoga of
           Nothing -> pure []
           Just f -> do
@@ -527,7 +538,9 @@ run opts src = do
               Right yt -> pure (driftLints schema yt)
         audit <- if opts.alloy then auditLints schema else pure []
         let
-          findings = fastLints schema <> drift <> audit
+          raw = fastLints schema <> drift <> audit
+          waived = applyWaivers (waivers intent.dirs) raw
+          findings = intent.setup <> waived.findings <> waived.stale
           v = verdictOf (sourceLabel src) schema findings
         liftEffect do
           Console.log (if opts.json then renderJson v else renderHuman v)
@@ -537,6 +550,52 @@ loadSchema :: Source -> String -> Either String Schema
 loadSchema src txt = case src of
   FromSql f -> schemaFromSql (Path.basename f) txt
   FromYoga f -> parseYogaSchema (Path.basename f) txt
+
+-- | Read and parse the `--intent` file (if any), validating its
+-- | assertions against the base schema. `dirs` feeds `applyIntent`;
+-- | `setup` carries read/parse errors and stale-assertion findings.
+loadIntent :: Maybe String -> Schema -> Aff { dirs :: Array Directive, setup :: Array Finding }
+loadIntent mfile schema = case mfile of
+  Nothing -> pure { dirs: [], setup: [] }
+  Just f -> do
+    e <- try (FS.readTextFile UTF8 f)
+    case e of
+      Left err ->
+        pure { dirs: [], setup: [ mkFail Fast SevError "intent" ("cannot read --intent " <> f <> ": " <> Exception.message err) ] }
+      Right txt -> case parseIntent txt of
+        Left perr ->
+          pure { dirs: [], setup: [ mkFail Fast SevError "intent" perr ] }
+        Right dirs ->
+          pure
+            { dirs
+            , setup: map (\ie -> mkFail Fast SevError ie.check ie.detail) (intentErrors dirs schema)
+            }
+
+-- | Apply waivers to the raw findings: a failing finding matched by a
+-- | waiver is downgraded to a noted, reason-carrying finding. Waivers
+-- | that match no current failure are reported as stale (a rotted intent
+-- | file is itself a fog-of-war artifact).
+applyWaivers :: Array Waiver -> Array Finding -> { findings :: Array Finding, stale :: Array Finding }
+applyWaivers ws raw = { findings: map applyOne raw, stale }
+  where
+  applyOne f =
+    case Array.find (\w -> matchWaiver w.check f.check) ws of
+      Just w ->
+        if f.status == Fail then
+          f
+            { status = Noted
+            , severity = SevNote
+            , detail = "WAIVED (" <> w.reason <> ") — was: " <> f.detail
+            }
+        else f
+      Nothing -> f
+
+  stale =
+    Array.filter (\w -> not (Array.any (\f -> f.status == Fail && matchWaiver w.check f.check) raw)) ws
+      # map
+          ( \w -> mkFail Fast SevWarning "intent-stale-waiver"
+              ("waiver for `" <> w.check <> "` matched no failing finding (stale?): " <> w.reason)
+          )
 
 -- | Print a message to stderr and exit with code 2 (usage/IO/tool error).
 die :: String -> Effect Unit

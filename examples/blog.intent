@@ -1,0 +1,14 @@
+-- notothenia intent file for examples/blog.sql
+-- Declared invariants the schema doesn't (or can't) encode. Durable,
+-- in-repo, consumed by:  notothenia check --sql blog.sql --intent blog.intent --alloy
+
+-- `parent_id` threads posts into a reply tree. The FK was dropped from
+-- the DDL in a legacy migration, but the reference is real — declare it
+-- so acyclicity/drift reason about it:
+fk posts.parent_id -> posts.id
+
+-- The reply tree is append-only (a reply only ever points at an OLDER
+-- post), so the row-level self-parent cycle Alloy can construct on that
+-- FK is acknowledged, not a bug:
+waive NoFKCycle: reply tree is append-only; parent_id only points at older posts
+waive fk-acyclicity: same — the fast-tier heuristic flags the asserted self-FK
