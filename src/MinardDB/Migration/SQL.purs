@@ -34,6 +34,7 @@
 -- | the caller can rewrite around.
 module MinardDB.Migration.SQL
   ( parseSql
+  , dbmateUp
   ) where
 
 import Prelude hiding (between)
@@ -45,6 +46,8 @@ import Data.Either (Either(..))
 import Data.Foldable (traverse_)
 import Data.Int as Int
 import Data.Maybe (Maybe(..), fromMaybe)
+import Data.String (Pattern(..))
+import Data.String as String
 import Data.String.CodeUnits (fromCharArray)
 import Data.String.Common (toLower)
 import MinardDB.Migration (Migration(..), MigrationSequence)
@@ -59,6 +62,33 @@ parseSql :: String -> Either String MigrationSequence
 parseSql src = case runParser src topLevel of
   Left err -> Left (parseErrorMessage err)
   Right ms -> Right ms
+
+-- | Extract the forward (`up`) section from a dbmate-style migration
+-- | file. dbmate (and several other migration tools) put both the
+-- | forward and rollback DDL in one file, delimited by magic line
+-- | comments:
+-- |
+-- |     -- migrate:up
+-- |     CREATE TABLE … ;
+-- |     -- migrate:down
+-- |     DROP TABLE … ;
+-- |
+-- | Because those delimiters are `--` comments, the parser's own
+-- | comment-stripping would eat the markers and then happily parse the
+-- | rollback DDL as more forward migrations. So we slice the up-section
+-- | out *before* parsing: keep everything from `-- migrate:up` (if
+-- | present) up to `-- migrate:down` (if present). A plain `.sql` file
+-- | with neither marker passes through unchanged.
+dbmateUp :: String -> String
+dbmateUp src =
+  let
+    afterUp = case String.indexOf (Pattern "-- migrate:up") src of
+      Just i -> String.drop i src
+      Nothing -> src
+  in
+    case String.indexOf (Pattern "-- migrate:down") afterUp of
+      Just j -> String.take j afterUp
+      Nothing -> afterUp
 
 ------------------------------------------------------------------------
 -- Whitespace + comments
@@ -281,7 +311,7 @@ constraintBody =
     cols <- parens columnList
     keyword "references"
     refTable <- qualifiedName
-    refColumns <- parens columnList
+    refColumns <- option [] (try (parens columnList))
     tail <- referencesTail
     pure (TIForeignKey
       { columns: cols
@@ -339,6 +369,7 @@ data ColModifier
   | MUnique
   | MDefault String
   | MRefs RefSpec
+  | MIgnored
 
 columnModifier :: Parser String ColModifier
 columnModifier = choice $ map try
@@ -346,6 +377,12 @@ columnModifier = choice $ map try
   , keyword "null" *> pure MNullable
   , keywords [ "primary", "key" ] *> pure MPrimaryKey
   , keyword "unique" *> pure MUnique
+  -- No-op-for-our-purposes column constraints. We accept and discard
+  -- them so real DDL parses; they carry no information the RI model
+  -- consumes. AUTOINCREMENT / AUTO_INCREMENT is the common one in the
+  -- wild (SQLite, MySQL).
+  , keyword "autoincrement" *> pure MIgnored
+  , keyword "auto_increment" *> pure MIgnored
   , do
       keyword "default"
       e <- defaultLiteral
@@ -353,7 +390,12 @@ columnModifier = choice $ map try
   , do
       keyword "references"
       refTable <- qualifiedName
-      refColumns <- parens columnList
+      -- The referenced column list is optional in SQL — omitted means
+      -- "the referenced table's primary key". We don't resolve that
+      -- here (it'd need the target table's definition, which may not be
+      -- parsed yet), so an omitted list leaves refColumns empty and the
+      -- FK is checked at table granularity only.
+      refColumns <- option [] (try (parens columnList))
       tail <- referencesTail
       pure (MRefs
         { refTable

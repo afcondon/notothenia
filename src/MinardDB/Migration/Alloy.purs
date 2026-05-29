@@ -182,8 +182,17 @@ render name cat initial trace = joinWith "\n\n"
   , renderInit initial cat
   , renderTransitions
   , renderTrace cat trace
-  , renderRIInvariants
+  , renderRIInvariants (stepBound trace)
   ]
+
+-- | Exact number of states the interleaved trace occupies: one
+-- | migration state + one populate state per step, plus the final
+-- | stutter state. The `check … but 1..N steps` bound MUST be at least
+-- | this or Alloy silently under-checks the tail of a long migration
+-- | history (the bound used to be a magic `20`, which quietly truncated
+-- | any real-world sequence longer than ~9 migrations).
+stepBound :: Array TraceStep -> Int
+stepBound trace = 2 * Array.length trace + 1
 
 header :: String -> String
 header n =
@@ -312,19 +321,32 @@ renderTransitions =
     , "// which cascade-removes the dropped table's rows. Source rows in"
     , "// other tables that referenced them now dangle — the row-level"
     , "// RI violation we want surfaced."
-    , "pred createTable[t: Table, cols: set Column] {"
+    , "// createTable activates the table, its columns, AND any FKs"
+    , "// declared inline in the CREATE TABLE (passed as `fks`). The"
+    , "// inline-FK case is why this arg exists: a CREATE TABLE whose"
+    , "// definition carries a FOREIGN KEY clause activates that FK at"
+    , "// creation time, not via a later ALTER. Omitting it (the old"
+    , "// `ActiveFK' = ActiveFK`) left inline FKs forever inactive, so"
+    , "// the schema-RI invariant was vacuously true for them — a model"
+    , "// bug the registry-dev field test surfaced."
+    , "pred createTable[t: Table, cols: set Column, fks: set FK] {"
     , "  t not in ActiveTable"
     , "  ActiveTable'  = ActiveTable + t"
     , "  ActiveColumn' = ActiveColumn + cols"
-    , "  ActiveFK'     = ActiveFK"
+    , "  ActiveFK'     = ActiveFK + fks"
     , "  ActiveRow'    = ActiveRow"
     , "}"
     , ""
+    , "// dropTable cascade-removes the dropped table's columns, its rows,"
+    , "// and FKs *sourced from* it (a table's own FK constraints die with"
+    , "// the table). FKs that *target* the dropped table are deliberately"
+    , "// left active so they dangle — that orphaned-reference state is"
+    , "// exactly the RI violation we want the trace to expose."
     , "pred dropTable[t: Table] {"
     , "  t in ActiveTable"
     , "  ActiveTable'  = ActiveTable - t"
     , "  ActiveColumn' = ActiveColumn - ofTable.t"
-    , "  ActiveFK'     = ActiveFK"
+    , "  ActiveFK'     = ActiveFK - srcTable.t"
     , "  ActiveRow'    = ActiveRow - ofTable.t"
     , "}"
     , ""
@@ -444,8 +466,10 @@ renderMigration cat = case _ of
       tSig = lookupTableSig cat t.name
       colSigs = Array.mapMaybe (\c -> columnSigFor cat t.name c.name) t.columns
       colExpr = if Array.null colSigs then "none" else joinWith " + " colSigs
+      fkSigs = Array.mapMaybe (\fk -> fkSigFor cat t.name fk.columns) t.foreignKeys
+      fkExpr = if Array.null fkSigs then "none" else joinWith " + " fkSigs
     in
-      "createTable[" <> tSig <> ", " <> colExpr <> "]"
+      "createTable[" <> tSig <> ", " <> colExpr <> ", " <> fkExpr <> "]"
   DropTable n ->
     "dropTable[" <> lookupTableSig cat n <> "]"
   AddColumn tName col ->
@@ -457,8 +481,8 @@ renderMigration cat = case _ of
   DropForeignKey tName cols ->
     "dropFK[" <> lookupFKSig cat tName cols <> "]"
 
-renderRIInvariants :: String
-renderRIInvariants = joinWith "\n"
+renderRIInvariants :: Int -> String
+renderRIInvariants bound = joinWith "\n"
   [ "// ── RI INVARIANTS ───────────────────────────────────────────────"
   , "// Split into schema-level and row-level so the verdicts diagnose"
   , "// which layer breaks. DROP TABLE on the target of an FK breaks"
@@ -485,8 +509,8 @@ renderRIInvariants = joinWith "\n"
   , ""
   , "assert SchemaRIPreserved { always RISchemaLevel }"
   , "assert RowRIPreserved    { always RIRowLevel }"
-  , "check SchemaRIPreserved for 5 but 1..20 steps"
-  , "check RowRIPreserved    for 5 but 1..20 steps"
+  , "check SchemaRIPreserved for 5 but 1.." <> show bound <> " steps"
+  , "check RowRIPreserved    for 5 but 1.." <> show bound <> " steps"
   ]
 
 ------------------------------------------------------------------------

@@ -143,8 +143,52 @@ member it actually is.
   doesn't consume them, and a real script that exercises
   them will get a positional error the caller can rewrite
   around.
-- **3e (migration timeline UI)** — defer until the safety
-  pass has a real use case in the wild.
+- **3d-field (real-world field test)** — done. The toy
+  fixtures all add FKs via a separate `AddForeignKey` step;
+  to exercise the parser and model on *real* DDL,
+  `MinardDB.Migration.SQL.FieldTest` points at the PureScript
+  Registry's dbmate migration set
+  (`registry-dev/db/migrations/*.sql`), applied in timestamp
+  order. dbmate puts forward and rollback DDL in one file
+  behind `-- migrate:up` / `-- migrate:down` markers, so
+  `dbmateUp` slices the up-section out before parsing
+  (those markers are `--` comments the parser would
+  otherwise strip, then parse the rollback as forward
+  migrations). Real DDL forced three parser-hardening
+  changes: optional REFERENCES column list (`references
+  jobs` with no `(col)`), `AUTOINCREMENT`/`AUTO_INCREMENT`
+  as no-op column constraints, and the up/down split.
+
+  The history is a gift: create `jobs` → create `logs`
+  (FK → jobs) → `DROP TABLE jobs; DROP TABLE logs;` →
+  rebuild under a new `job_info` schema. The destructive
+  step drops `jobs` while `logs` still references it — a
+  *transient* dangling FK. The migration ends consistent
+  (both gone, fresh schema built), so the static pass
+  reports **zero standing issues**, yet the temporal
+  `always RIHolds` assertion comes back **BROKEN**: RI is
+  violated *in transit*. That final-clean / trace-dirty
+  contrast is the entire argument for doing this in
+  temporal logic instead of diffing endpoints.
+
+  The field test also earned its keep by catching a real
+  model bug on first contact: `createTable` activated the
+  table and its columns but **not** its inline FKs (it did
+  `ActiveFK' = ActiveFK`), because every toy fixture added
+  FKs via a separate step. So `SchemaRIPreserved` initially
+  returned PROVEN while the static walker said the FK
+  dangled — a disagreement, which the design always said
+  was itself a useful signal. Fix: `createTable[t, cols,
+  fks]` now activates inline FKs, and `dropTable` cascade-
+  removes FKs *sourced from* the dropped table (`ActiveFK -
+  srcTable.t`) while leaving FKs that *target* it active so
+  they dangle. The bounded-step count also became a bug at
+  this length — it was a hardcoded `1..20` that silently
+  truncated any history longer than ~9 migrations; it now
+  derives from the trace length (`2·nSteps + 1`).
+- **3e (migration timeline UI)** — the 3d field test is the
+  "real use case in the wild" this was gated on. Unblocked;
+  next up when the UI work resumes.
 
 **Note: Data Model section below has drifted.** The plan originally
 described a shared `minard_db_*` namespace inside Minard's DuckDB.
