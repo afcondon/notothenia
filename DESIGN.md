@@ -209,6 +209,44 @@ member it actually is.
   (Analyses | Migrations) with hash routing (`#m`, `#m/<name>`)
   alongside the existing analysis routes (`#<int>`).
 
+**Phase 4 — in progress (query reach analysis).**
+
+- **4a (query parsing + reach + dead columns)** — done. The
+  DDL parser's token layer was first extracted into a shared
+  `MinardDB.SQL.Lexer` (whitespace/comments, keywords,
+  quoted-or-bare identifiers parameterised by a reserved-word
+  predicate, punctuation, integers); `Migration.SQL` was
+  refactored onto it with no change to the migration smoke
+  verdicts. `MinardDB.Query.parseQuery` then tokenises a query
+  and *heuristically harvests* the references it touches —
+  FROM/JOIN tables (with aliases) via a small state machine,
+  and column references (qualified `t.c`, `t.*`, bare `c`, and
+  `*`) from the whole token stream. It deliberately does NOT
+  build an expression grammar (CASE/arithmetic/window funcs);
+  it errs toward *over*-collecting refs, which is the safe
+  direction for dead-column work. `MinardDB.Query.Reach`
+  resolves those raw refs against a `Schema` into concrete
+  `(table, column)` pairs, applying SQL name resolution:
+  aliases → tables, `*`/`t.*` expansion, and the bare-column
+  unambiguity rule (a bare `c` resolves to the unique FROM
+  table that has a column `c`; zero candidates → unresolved,
+  >1 → ambiguous, reported either way). Aggregating reach over
+  a query set and subtracting from the schema's columns gives
+  the **dead columns**. Smoke (`MinardDB.Query.Smoke`) runs a
+  blog schema + four queries (join+alias, bare cols, `SELECT
+  *`, UPDATE) and correctly reaches 8/9 columns, flagging
+  `users.legacy_token` — the one column no query touches — as
+  dead. Honest gaps (documented, parser never fails on them):
+  subqueries in FROM aren't descended into, CTE names leak in
+  as pseudo-tables.
+- **4b (reach-map visualization)** — defer. The reach data is
+  computed; the natural next step is to colour the topology
+  view (touched vs dead columns/tables) and/or a per-query
+  Sankey, reusing the Phase 2d/3e frontend patterns.
+- **4c (point at real query sources)** — defer. Feed actual
+  application SQL / query logs (e.g. Marginalia's queries) and
+  report its dead columns, the field-test analogue for Phase 4.
+
 **Note: Data Model section below has drifted.** The plan originally
 described a shared `minard_db_*` namespace inside Minard's DuckDB.
 Implementation diverged: notothenia owns `database/notothenia.duckdb`
@@ -578,11 +616,12 @@ the shrinking output. `locus` is the fault-localized sub-structure.
 - Verify referential integrity preservation across migrations
 - Migration timeline visualization
 
-**Phase 4: Query reach analysis**
-- Parse SQL queries (from application code or query logs)
-- Map queries to tables/columns touched
-- Reach map visualization
-- Dead column detection
+**Phase 4: Query reach analysis** (4a done — see the status block
+near the top of this file for the as-built notes)
+- Parse SQL queries (from application code or query logs) ✓ (4a)
+- Map queries to tables/columns touched ✓ (4a)
+- Dead column detection ✓ (4a)
+- Reach map visualization (4b, deferred)
 
 ## Test Cases
 

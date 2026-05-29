@@ -41,20 +41,18 @@ import Prelude hiding (between)
 
 import Control.Alt ((<|>))
 import Data.Array as Array
-import Data.Char (toCharCode)
 import Data.Either (Either(..))
-import Data.Foldable (traverse_)
-import Data.Int as Int
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.String (Pattern(..))
 import Data.String as String
 import Data.String.CodeUnits (fromCharArray)
 import Data.String.Common (toLower)
 import MinardDB.Migration (Migration(..), MigrationSequence)
+import MinardDB.SQL.Lexer (identifierWith, integer, isAsciiDigit, keyword, keywords, lexeme, parens, rawWord, skipFiller, symbol)
 import MinardDB.Schema (Column, FKAction(..), ForeignKey, PGType(..), Table)
 import Parsing (Parser, fail, parseErrorMessage, runParser)
-import Parsing.Combinators (between, choice, lookAhead, manyTill, option, optionMaybe, sepBy1, try)
-import Parsing.String (anyChar, char, eof, satisfy, string)
+import Parsing.Combinators (choice, lookAhead, option, optionMaybe, sepBy1, try)
+import Parsing.String (char, eof, satisfy)
 
 -- | Top-level entry. Parses a multi-statement script; returns the
 -- | sequence of migrations or the first parse error.
@@ -91,95 +89,16 @@ dbmateUp src =
       Nothing -> afterUp
 
 ------------------------------------------------------------------------
--- Whitespace + comments
+-- DDL identifiers (token layer is shared in MinardDB.SQL.Lexer)
 ------------------------------------------------------------------------
 
-isWsChar :: Char -> Boolean
-isWsChar c = c == ' ' || c == '\t' || c == '\n' || c == '\r'
-
-isAsciiLetter :: Char -> Boolean
-isAsciiLetter c =
-  let n = toCharCode c
-  in (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
-
-isAsciiDigit :: Char -> Boolean
-isAsciiDigit c =
-  let n = toCharCode c
-  in n >= 48 && n <= 57
-
-isWordChar :: Char -> Boolean
-isWordChar c = isAsciiLetter c || isAsciiDigit c || c == '_'
-
--- | Consume whitespace and `--` / `/* */` comments until a real token.
-skipFiller :: Parser String Unit
-skipFiller = go
-  where
-  go = do
-    progress <-
-          (satisfy isWsChar *> pure true)
-      <|> try (lineCmt *> pure true)
-      <|> try (blockCmt *> pure true)
-      <|> pure false
-    if progress then go else pure unit
-
-  lineCmt = do
-    _ <- string "--"
-    _ <- manyTill anyChar (void (char '\n') <|> eof)
-    pure unit
-
-  blockCmt = do
-    _ <- string "/*"
-    _ <- manyTill anyChar (string "*/")
-    pure unit
-
--- | Token wrapper: parse `p`, then eat trailing filler.
-lexeme :: forall a. Parser String a -> Parser String a
-lexeme p = p <* skipFiller
-
-------------------------------------------------------------------------
--- Token primitives
-------------------------------------------------------------------------
-
--- | A bare word starting with letter or `_`, continuing with word chars.
--- | Does NOT consume trailing whitespace.
-rawWord :: Parser String String
-rawWord = do
-  c <- satisfy (\ch -> isAsciiLetter ch || ch == '_')
-  cs <- Array.many (try (satisfy isWordChar))
-  pure (fromCharArray (Array.cons c cs))
-
--- | Case-insensitive keyword. Matches a full word, fails (without
--- | committing) if the word doesn't equal `kw`.
-keyword :: String -> Parser String Unit
-keyword kw = lexeme $ try do
-  w <- rawWord
-  if toLower w == toLower kw then pure unit
-  else fail ("expected `" <> kw <> "`")
-
--- | A multi-word keyword phrase: e.g. `keywords ["foreign", "key"]`.
--- | All-or-nothing: if any word fails, position is reset.
-keywords :: Array String -> Parser String Unit
-keywords ks = try (traverse_ keyword ks)
-
--- | An identifier: either an unquoted SQL identifier (not a reserved
--- | word) or a double-quoted name.
+-- | An identifier that isn't one of the DDL grammar's reserved words.
 identifier :: Parser String String
-identifier = lexeme $ quoted <|> bare
-  where
-  quoted = do
-    _ <- char '"'
-    cs <- Array.many (satisfy (_ /= '"'))
-    _ <- char '"'
-    pure (fromCharArray cs)
-  bare = try do
-    w <- rawWord
-    if isReserved (toLower w)
-      then fail ("unexpected keyword `" <> w <> "` where identifier expected")
-      else pure w
+identifier = identifierWith isReserved
 
--- | Reserved words our grammar uses syntactically. Quoted identifiers
--- | bypass this list, so a schema with a table literally called
--- | `"order"` still parses.
+-- | Reserved words the DDL grammar uses syntactically. Quoted
+-- | identifiers bypass this list, so a table literally called `"order"`
+-- | still parses.
 isReserved :: String -> Boolean
 isReserved w = Array.elem w
   [ "add", "alter", "cascade", "column", "constraint", "create"
@@ -196,23 +115,6 @@ qualifiedName = do
   first <- identifier
   rest <- optionMaybe (try (symbol "." *> identifier))
   pure (fromMaybe first rest)
-
--- | A literal punctuation token, with trailing whitespace eaten.
-symbol :: String -> Parser String Unit
-symbol s = lexeme (void (string s))
-
--- | A positive integer literal. Used for VARCHAR(n) and default
--- | expressions.
-integer :: Parser String Int
-integer = lexeme do
-  ds <- Array.some (try (satisfy isAsciiDigit))
-  case Int.fromString (fromCharArray ds) of
-    Just n -> pure n
-    Nothing -> fail "integer literal too large"
-
--- | `(p)`.
-parens :: forall a. Parser String a -> Parser String a
-parens = between (symbol "(") (symbol ")")
 
 -- | One-or-more identifiers separated by commas, returned as an Array.
 columnList :: Parser String (Array String)
