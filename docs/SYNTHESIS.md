@@ -283,6 +283,15 @@ Each rung is concrete. The Schema AST is the pivot between value-world
    detection). *Prerequisite for everything below.* Will expose fidelity
    gaps in our own `Schema` (we discard DEFAULT-expr contents; FK
    refColumns sometimes empty).
+   **STATUS (2026-05-29): forward half DONE** — `MinardDB.Codegen.YogaTable`
+   (`emitTable`/`emitModule`), dependency-free text gen. Validated against
+   *real* yoga: all 14 Marginalia tables → `generated/MarginaliaSchema.purs`
+   compiles against `yoga-postgres`; a typed query against the generated
+   `ProjectsTable` type-checks, a bogus column fails to compile. The
+   reverse half (parse `Table` → `Schema` → diff) is 5b, not yet built.
+   Fidelity gaps confirmed exactly as predicted (literal-vs-expression
+   defaults recovered heuristically; composite uniques dropped; bigint/
+   decimal lossy).
 
 2. **Alloy proves, on the yoga types, what types can't say.** Derive a
    `Schema` from someone's `Table` declarations, run the proof catalog —

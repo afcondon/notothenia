@@ -306,6 +306,37 @@ member it actually is.
   renders the full schema as a usage heatmap with `projects.id`
   hottest (38 references).
 
+**Phase 5 — in progress (the type-level turn; see `docs/SYNTHESIS.md`).**
+
+- **5a (forward codegen bridge)** — done. `MinardDB.Codegen.YogaTable`
+  turns a notothenia `Schema` into rowtype-yoga type-level `Table`
+  declarations (`emitTable`, `emitModule`). PGType→PS-type map; wrapper
+  composition PrimaryKey ▸ AutoIncrement ▸ ForeignKey ▸ Unique ▸
+  Default/DefaultExpr ▸ Nullable ▸ base. Dependency-free (emits text;
+  yoga is the *consumer's* dependency). Validated end-to-end against
+  *real* yoga: generated all 14 tables of Marginalia's schema into
+  `generated/MarginaliaSchema.purs`, compiled it against
+  `yoga-postgres` (0 errors), then confirmed a typed query
+  (`from projects # select @"name, status, slug" # where_
+  @"domain = $domain" # orderBy @"name"`) type-checks — and that a
+  bogus column fails with `Column "…" not found in any table`. The
+  bridge works: notothenia parses a real schema, emits the type-world
+  artifact, and the compiler enforces query conformance against it.
+  Heuristics + fidelity gaps the cut surfaced (per the white paper's
+  prediction): `defaultExpr` is a bare `Maybe String` that lost its
+  quotes, so literal-vs-expression defaults are recovered by heuristic
+  (`nextval`→AutoIncrement; `foo(...)`/`current_timestamp`→DefaultExpr;
+  else Default); composite UNIQUEs don't map to per-column `Unique`;
+  `PGBigInt`→`Int`, `PGDecimal`→`Number` are lossy; FK `ON DELETE`
+  actions are dropped (they belong to Alloy's migration model, not the
+  query-conformance type).
+- **5b (reverse: parse `Table` decls → Schema, diff vs catalog)** —
+  next. Needs a small PureScript type-declaration parser; enables
+  drift detection.
+- **5c+ (Alloy-on-yoga-types; compile-time reach/dead-columns via a
+  query manifest; migration-breaks-a-query as a type error)** — the
+  extension ladder rungs 2–4. See `docs/SYNTHESIS.md`.
+
 **Note: Data Model section below has drifted.** The plan originally
 described a shared `minard_db_*` namespace inside Minard's DuckDB.
 Implementation diverged: notothenia owns `database/notothenia.duckdb`
