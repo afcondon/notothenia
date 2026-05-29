@@ -661,3 +661,144 @@ td code, .source-path code {
 .tl-issues li { margin-top: 0.2rem; }
 .tl-issues.introduced li { color: #c62828; }
 .tl-issues.resolved li { color: #2e7d32; }
+
+/* Query reach — schema usage heatmap grid -------------------------------- */
+
+.reach-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1.25rem;
+  margin: 1rem 0 2rem;
+}
+
+.reach-table {
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.reach-table-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 0.5rem 0.75rem;
+  background: #1a1a1a;
+  color: #f5f5f5;
+  letter-spacing: 0.01em;
+}
+
+.reach-cols { padding: 0.4rem 0.75rem 0.6rem; }
+
+.reach-col {
+  display: grid;
+  grid-template-columns: 9rem 1fr 2.5rem;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.2rem 0;
+}
+
+.reach-col-name {
+  font-family: "SF Mono", "Menlo", monospace;
+  font-size: 0.8rem;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reach-bar-track {
+  height: 0.7rem;
+  background: #f0f0f0;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+/* Monochrome intensity ramp: the bar is ink, the track is pale grey. */
+.reach-bar {
+  display: block;
+  height: 100%;
+  background: #1a1a1a;
+  border-radius: 2px;
+  min-width: 1px;
+}
+
+.reach-count {
+  font-size: 0.8rem;
+  color: #666;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Dead columns: hollow bar, warm-grey name, a small tag. */
+.reach-col.dead .reach-col-name { color: #b0b0b0; text-decoration: line-through; }
+.reach-col.dead .reach-bar-track { background: repeating-linear-gradient(
+  45deg, #fafafa, #fafafa 3px, #f0e0e0 3px, #f0e0e0 6px); }
+.reach-col.dead .reach-bar { background: transparent; }
+
+.reach-dead-tag {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #c62828;
+  text-align: right;
+}
+
+/* Query footprints ------------------------------------------------------- */
+
+.footprints { display: flex; flex-direction: column; gap: 1rem; }
+
+.footprint {
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  background: #fafafa;
+}
+
+.footprint-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.footprint-kind {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #fff;
+  background: #555;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+}
+
+.footprint-label { font-weight: 600; font-size: 0.95rem; }
+
+.footprint-sql {
+  background: #1a1a1a;
+  color: #f5f5f5;
+  padding: 0.5rem 0.75rem;
+  border-radius: 3px;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  margin: 0.3rem 0 0.5rem;
+}
+.footprint-sql code { background: transparent; color: inherit; padding: 0; }
+
+.fp-line {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  padding: 0.1rem 0;
+}
+
+.fp-label {
+  min-width: 5.5rem;
+  color: #888;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.fp-line.warn span:last-child { color: #c62828; }
+
+.footprint-warn { color: #c62828; font-size: 0.85rem; }

@@ -10,7 +10,7 @@ import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
 import Data.Int as Int
 import Data.Maybe (Maybe(..), isJust)
-import Data.String (Pattern(..), stripSuffix)
+import Data.String (Pattern(..), stripPrefix, stripSuffix)
 import Data.Traversable (traverse)
 import Data.Tuple.Nested ((/\))
 import Effect.Aff (Aff, attempt)
@@ -32,6 +32,7 @@ data Route
   | ListAnalyses
   | GetAnalysis Int
   | ListMigrations
+  | ListReach
 
 derive instance genericRoute :: Generic Route _
 
@@ -41,13 +42,19 @@ routes = root $ sum
   , "ListAnalyses":   path "api" (path "analyses" noArgs)
   , "GetAnalysis":    path "api" (path "analyses" (int segment))
   , "ListMigrations": path "api" (path "migrations" noArgs)
+  , "ListReach":      path "api" (path "reach" noArgs)
   }
 
--- | Where the migration-report generator (`MinardDB.Migration.Report`)
--- | writes its JSON. Relative to the backend's cwd — launch the server
--- | from the package root, the same place the generator runs.
+-- | Where the report generators write their JSON. Relative to the
+-- | backend's cwd — launch the server from the package root, the same
+-- | place the generators run. Two report families share this directory,
+-- | distinguished by filename prefix: migration reports have no prefix
+-- | (`safe.json`, …), reach reports are `reach-*.json`.
 reportsDir :: String
 reportsDir = "reports"
+
+reachPrefix :: String
+reachPrefix = "reach-"
 
 corsHeaders :: ResponseHeaders
 corsHeaders = headers
@@ -82,21 +89,37 @@ main = serve { port: 3080, hostname: "localhost" } { route: routes, router }
           ok' corsHeaders (stringify (encodeDetail detail mschema))
 
     handle ListMigrations = do
-      reports <- liftAff readAllReports
+      reports <- liftAff (readReports isMigrationFile)
       ok' corsHeaders (stringify (J.fromObject (Object.singleton "migrations" (J.fromArray reports))))
 
--- | Read every `*.json` migration report from `reportsDir` and return
+    handle ListReach = do
+      reports <- liftAff (readReports isReachFile)
+      ok' corsHeaders (stringify (J.fromObject (Object.singleton "reach" (J.fromArray reports))))
+
+-- | Migration reports: any `*.json` that is NOT a `reach-*.json`.
+isMigrationFile :: String -> Boolean
+isMigrationFile n =
+  isJust (stripSuffix (Pattern ".json") n)
+    && not (isJust (stripPrefix (Pattern reachPrefix) n))
+
+-- | Reach reports: `reach-*.json`.
+isReachFile :: String -> Boolean
+isReachFile n =
+  isJust (stripSuffix (Pattern ".json") n)
+    && isJust (stripPrefix (Pattern reachPrefix) n)
+
+-- | Read every report file matching `keep` from `reportsDir` and return
 -- | the parsed objects. A missing directory yields an empty list (the
 -- | generator just hasn't been run yet), not an error; an individual
 -- | unreadable/unparseable file is skipped rather than failing the
 -- | whole request.
-readAllReports :: Aff (Array Json)
-readAllReports =
+readReports :: (String -> Boolean) -> Aff (Array Json)
+readReports keep =
   attempt (FS.readdir reportsDir) >>= case _ of
     Left _ -> pure []
     Right names -> do
-      let jsonNames = Array.filter (\n -> isJust (stripSuffix (Pattern ".json") n)) names
-      parsed <- traverse readOne (Array.sort jsonNames)
+      let chosen = Array.filter keep names
+      parsed <- traverse readOne (Array.sort chosen)
       pure (Array.catMaybes parsed)
   where
   readOne name =

@@ -21,77 +21,16 @@ import Effect (Effect)
 import Effect.Class.Console as Console
 import MinardDB.Query (parseQuery)
 import MinardDB.Query.Reach (deadColumns, resolveReach, showColumnId)
-import MinardDB.Schema (Column, PGType(..), Schema, Table)
+import MinardDB.Query.Report (LabeledQuery, blogQueries, blogSchema)
+import MinardDB.Schema (Schema)
 
-------------------------------------------------------------------------
--- Fixture schema
-------------------------------------------------------------------------
-
-col :: String -> PGType -> Column
-col name dataType = { name, dataType, nullable: false, defaultExpr: Nothing }
-
-usersTable :: Table
-usersTable =
-  { name: "users"
-  , schemaName: "main"
-  , columns:
-      [ col "id" PGInt
-      , col "name" PGText
-      , col "email" PGText
-      , col "legacy_token" PGText   -- DEAD: no query references this
-      ]
-  , primaryKey: [ "id" ]
-  , foreignKeys: []
-  , uniqueConstraints: []
-  , functionalDependencies: []
-  }
-
-postsTable :: Table
-postsTable =
-  { name: "posts"
-  , schemaName: "main"
-  , columns:
-      [ col "id" PGInt
-      , col "author_id" PGInt
-      , col "title" PGText
-      , col "body" PGText
-      , col "published" PGBoolean
-      ]
-  , primaryKey: [ "id" ]
-  , foreignKeys: []
-  , uniqueConstraints: []
-  , functionalDependencies: []
-  }
-
+-- Reuse the canonical fixture (single source of truth lives in
+-- MinardDB.Query.Report, which also drives the frontend reach view).
 schema :: Schema
-schema = { name: "blog", tables: [ usersTable, postsTable ] }
+schema = blogSchema
 
-------------------------------------------------------------------------
--- Fixture queries
-------------------------------------------------------------------------
-
-queries :: Array { label :: String, sql :: String }
-queries =
-  [ { label: "join + qualified + alias"
-    , sql:
-        """
-        SELECT u.name, u.email, p.title, p.body
-        FROM posts p
-        JOIN users u ON p.author_id = u.id
-        WHERE p.published = true
-        ORDER BY p.id
-        """
-    }
-  , { label: "bare columns, single table"
-    , sql: "SELECT id, title FROM posts WHERE published = true"
-    }
-  , { label: "star over one table"
-    , sql: "SELECT * FROM posts WHERE id = 1"
-    }
-  , { label: "update touches a column"
-    , sql: "UPDATE posts SET published = true WHERE id = 42"
-    }
-  ]
+queries :: Array LabeledQuery
+queries = blogQueries
 
 ------------------------------------------------------------------------
 -- Runner

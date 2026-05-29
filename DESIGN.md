@@ -239,10 +239,29 @@ member it actually is.
   dead. Honest gaps (documented, parser never fails on them):
   subqueries in FROM aren't descended into, CTE names leak in
   as pseudo-tables.
-- **4b (reach-map visualization)** — defer. The reach data is
-  computed; the natural next step is to colour the topology
-  view (touched vs dead columns/tables) and/or a per-query
-  Sankey, reusing the Phase 2d/3e frontend patterns.
+- **4b (reach-map visualization)** — done. Same precompute →
+  store → serve → render shape as 3e. `MinardDB.Query.Report`
+  resolves a fixture schema + query set, counts how many
+  queries touch each column, flags the dead ones, and writes
+  `reports/reach-<name>.json`; the fixture (a blog schema with
+  a deliberately-dead `users.legacy_token`) is the single
+  source of truth, imported by `Query.Smoke`. The backend
+  serves it at `/api/reach`; migration and reach reports share
+  `reports/` and are kept apart by filename prefix
+  (`reach-*.json` vs the unprefixed migration reports), filtered
+  in each endpoint. `MinardDB.Frontend.Reach` renders the
+  **schema usage heatmap**: a grid of table cards, each column
+  drawn with a bar proportional to its reach count on a
+  monochrome ink ramp, dead columns struck through with a
+  hatched track and a red DEAD tag. Below the grid, each
+  query's footprint (the SQL, the tables it reads, the columns
+  it touches, and any ambiguous/unresolved refs) is listed. A
+  callout names the payoff loop: a dead column is a DROP COLUMN
+  candidate, and Phase 3's verifier can prove the drop
+  preserves RI before you commit. Third nav tab (Analyses |
+  Migrations | Query reach) with hash routes `#r`, `#r/<name>`.
+  Chosen design (per the as-built notes): a dedicated grid, not
+  columns-in-topology — legibility over FK structure here.
 - **4c (point at real query sources)** — defer. Feed actual
   application SQL / query logs (e.g. Marginalia's queries) and
   report its dead columns, the field-test analogue for Phase 4.
@@ -621,7 +640,7 @@ near the top of this file for the as-built notes)
 - Parse SQL queries (from application code or query logs) ✓ (4a)
 - Map queries to tables/columns touched ✓ (4a)
 - Dead column detection ✓ (4a)
-- Reach map visualization (4b, deferred)
+- Reach map visualization ✓ (4b — schema usage heatmap grid)
 
 ## Test Cases
 

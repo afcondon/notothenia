@@ -21,6 +21,7 @@ import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
+import MinardDB.Frontend.Reach (ReachReport, parseReachReports, reachList, reachView)
 import MinardDB.Frontend.Timeline (MigrationReport, parseReports, timelineList, timelineView)
 import MinardDB.Frontend.Topology (SchemaData, parseSchemaData, topologyView)
 import Web.HTML (window)
@@ -76,11 +77,14 @@ data View
   | ErrorView String
   | MigrationListView
   | MigrationDetailView MigrationReport
+  | ReachListView
+  | ReachDetailView ReachReport
 
 type State =
   { view :: View
   , analyses :: Array Summary
   , migrations :: Array MigrationReport
+  , reachReports :: Array ReachReport
   , loading :: Boolean
   , error :: Maybe String
   }
@@ -93,6 +97,8 @@ data Action
   | GoAnalyses
   | GoMigrations
   | SelectMigration String
+  | GoReach
+  | SelectReach String
 
 component :: forall q i o m. MonadAff m => H.Component q i o m
 component =
@@ -110,6 +116,7 @@ initialState =
   { view: ListView
   , analyses: []
   , migrations: []
+  , reachReports: []
   , loading: true
   , error: Nothing
   }
@@ -119,9 +126,12 @@ handleAction = case _ of
   Initialize -> do
     loadList
     loadMigrations
+    loadReach
     -- Hash-deep-link on load. Routes:
     --   #m/<name> → that migration's timeline
     --   #m        → migration list
+    --   #r/<name> → that reach report
+    --   #r        → reach list
     --   #<int>    → that analysis's detail
     --   (empty)   → analysis list
     -- Reload-survival + shareable URLs.
@@ -129,6 +139,8 @@ handleAction = case _ of
     case parseRoute h of
       RouteMigration name -> showMigration name
       RouteMigrationList -> H.modify_ _ { view = MigrationListView }
+      RouteReach name -> showReach name
+      RouteReachList -> H.modify_ _ { view = ReachListView }
       RouteAnalysis id -> selectAnalysis id
       RouteAnalysisList -> pure unit
   Refresh -> loadList
@@ -145,6 +157,11 @@ handleAction = case _ of
     loadMigrations
     H.modify_ _ { view = MigrationListView }
   SelectMigration name -> showMigration name
+  GoReach -> do
+    liftEffect (writeHash "#r")
+    loadReach
+    H.modify_ _ { view = ReachListView }
+  SelectReach name -> showReach name
   where
     loadList = do
       H.modify_ _ { loading = true, error = Nothing }
@@ -162,6 +179,14 @@ handleAction = case _ of
         Right r -> case jsonParser r.body >>= parseReports of
           Left _ -> pure unit
           Right xs -> H.modify_ _ { migrations = xs }
+
+    loadReach = do
+      resp <- H.liftAff $ AX.get RF.string (apiBase <> "/api/reach")
+      case resp of
+        Left _ -> pure unit
+        Right r -> case jsonParser r.body >>= parseReachReports of
+          Left _ -> pure unit
+          Right xs -> H.modify_ _ { reachReports = xs }
 
     selectAnalysis id = do
       liftEffect (writeHash ("#" <> show id))
@@ -189,12 +214,26 @@ handleAction = case _ of
             Just r -> H.modify_ _ { view = MigrationDetailView r }
             Nothing -> H.modify_ _ { view = MigrationListView }
 
+    showReach name = do
+      liftEffect (writeHash ("#r/" <> name))
+      st <- H.get
+      case Array.find (\r -> r.name == name) st.reachReports of
+        Just r -> H.modify_ _ { view = ReachDetailView r }
+        Nothing -> do
+          loadReach
+          st' <- H.get
+          case Array.find (\r -> r.name == name) st'.reachReports of
+            Just r -> H.modify_ _ { view = ReachDetailView r }
+            Nothing -> H.modify_ _ { view = ReachListView }
+
 -- | Hash routing.
 data Route
   = RouteAnalysisList
   | RouteAnalysis Int
   | RouteMigrationList
   | RouteMigration String
+  | RouteReachList
+  | RouteReach String
 
 readHash :: Effect String
 readHash = window >>= location >>= hash
@@ -206,13 +245,17 @@ parseRoute :: String -> Route
 parseRoute h = case String.stripPrefix (String.Pattern "#") h of
   Nothing -> RouteAnalysisList
   Just "" -> RouteAnalysisList
-  Just rest -> case String.stripPrefix (String.Pattern "m/") rest of
-    Just name | name /= "" -> RouteMigration name
-    _ ->
-      if rest == "m" then RouteMigrationList
-      else case Int.fromString rest of
-        Just id -> RouteAnalysis id
-        Nothing -> RouteAnalysisList
+  Just rest ->
+    case String.stripPrefix (String.Pattern "m/") rest of
+      Just name | name /= "" -> RouteMigration name
+      _ -> case String.stripPrefix (String.Pattern "r/") rest of
+        Just name | name /= "" -> RouteReach name
+        _ ->
+          if rest == "m" then RouteMigrationList
+          else if rest == "r" then RouteReachList
+          else case Int.fromString rest of
+            Just id -> RouteAnalysis id
+            Nothing -> RouteAnalysisList
 
 -- Render ---
 
@@ -227,6 +270,8 @@ render state =
         ErrorView err -> HH.div [ HP.class_ (HH.ClassName "error") ] [ HH.text err ]
         MigrationListView -> timelineList state.migrations SelectMigration
         MigrationDetailView r -> timelineView r GoMigrations
+        ReachListView -> reachList state.reachReports SelectReach
+        ReachDetailView r -> reachView r GoReach
     , footer
     ]
 
@@ -249,6 +294,12 @@ header view =
             , HE.onClick (\_ -> GoMigrations)
             ]
             [ HH.text "Migrations" ]
+        , HH.a
+            [ HP.class_ (HH.ClassName (navClass (isReachView view)))
+            , HP.href "#r"
+            , HE.onClick (\_ -> GoReach)
+            ]
+            [ HH.text "Query reach" ]
         ]
     ]
   where
@@ -260,8 +311,14 @@ isMigrationView = case _ of
   MigrationDetailView _ -> true
   _ -> false
 
+isReachView :: View -> Boolean
+isReachView = case _ of
+  ReachListView -> true
+  ReachDetailView _ -> true
+  _ -> false
+
 isAnalysisView :: View -> Boolean
-isAnalysisView v = not (isMigrationView v)
+isAnalysisView v = not (isMigrationView v) && not (isReachView v)
 
 footer :: forall a. HH.HTML a Action
 footer =
