@@ -36,3 +36,9 @@ workspace:
   extraPackages:
     httpurple:
       path: ../../purescript-httpurple-ws
+    # yoga-postgres consumed from GitHub (harmonized deps PR #1, merged
+    # 2026-05-30) rather than the registry — no publish needed. Pinned to
+    # the merge commit so the build doesn't drift with upstream main.
+    yoga-postgres:
+      git: "https://github.com/rowtype-yoga/purescript-yoga-postgres.git"
+      ref: "35e82506277b4c948939967b35ad8b1796b3541c"

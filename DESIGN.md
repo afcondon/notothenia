@@ -373,6 +373,19 @@ member it actually is.
 - **5d+ (compile-time reach/dead-columns via a query manifest;
   migration-breaks-a-query as a type error)** — the extension ladder
   rungs 3–4. See `docs/SYNTHESIS.md`.
+- **Bridge workspace home — established (2026-05-30).** Rungs 3–4 need
+  type-level code that depends on yoga, so it can't live in
+  dependency-free `minard-db`. New workspace package **`minard-bridge`**
+  (`bridge/`) depends on **yoga-postgres consumed from GitHub** (git
+  `extraPackage` pinned to merge commit `35e8250` of
+  rowtype-yoga/purescript-yoga-postgres PR #1 — the dependency
+  harmonization, see `docs/yoga-postgres-harmonization.md`), no registry
+  publish needed. Package set 73.3.0 resolves yoga-postgres's transitive
+  deps (heterogeneous 0.7, yoga-sql-types 0.2) with no overrides.
+  `bridge/src/Smoke.purs` compiles a typed `Q` query whose explicit
+  signature documents where the rung-3/4 signals live (`result` row =
+  projection reach; `params` row = WHERE params typed to their columns).
+  This is where rungs 3–4 get built.
 
 **`check` verdict/CLI surface — done (2026-05-29).** `MinardDB.Check`
 is the agent-runnable front door: `(--sql FILE | --yoga FILE)

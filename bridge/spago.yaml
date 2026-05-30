@@ -1,0 +1,7 @@
+package:
+  name: minard-bridge
+  description: "Bridge: notothenia Schema ⇄ yoga-postgres type-level Q. Home for extension-ladder rungs 3–4 (migration-breaks-a-query, compile-time dead columns). Kept separate so minard-db stays yoga-dependency-free."
+  dependencies:
+    - prelude
+    - effect
+    - yoga-postgres
