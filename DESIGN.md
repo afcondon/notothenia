@@ -386,6 +386,22 @@ member it actually is.
   signature documents where the rung-3/4 signals live (`result` row =
   projection reach; `params` row = WHERE params typed to their columns).
   This is where rungs 3–4 get built.
+- **Rung 4 — migration-breaks-a-query → type error — done (2026-05-30).**
+  In `bridge/`: schema `SchemaV1` (has `email`) and `SchemaV2` (migration
+  dropped `email`), both generated-style yoga `Table` types as rung-1's
+  codegen emits. A `Queries` manifest compiles green and that *is* the
+  proof: `userContactsV1` reaches `email` against V1, and `userAgesV2` —
+  reaching no dropped column — still compiles against V2, so V2 is a
+  valid queryable schema. The must-fail half lives in
+  `bridge/compile-fail-tests/MigrationBreaksQuery.purs` (`userContacts`
+  reaching `email` against V2), exercised by `run.sh` with yoga's own
+  `-- EXPECT: NoInstanceFound` marker. Failure is call-site-precise:
+  `Column "email" not found in any table` under `^^^` at
+  `select @"name, email"`, `in value declaration userContacts`. No new
+  type-level code — pure yoga `ResolveColumn`, pointed at a migration.
+  Scope honesty: projection-and-predicate reach only; full dead-column
+  analysis (rung 3) still needs yoga to emit referenced-column sets. Full
+  writeup: `bridge/RUNG4.md`.
 
 **`check` verdict/CLI surface — done (2026-05-29).** `MinardDB.Check`
 is the agent-runnable front door: `(--sql FILE | --yoga FILE)
