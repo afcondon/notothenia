@@ -463,6 +463,30 @@ matching no current failure). Runnable example in `examples/blog.{sql,intent}`
 `CREATE ASSERTION` slot from `docs/notothenia-vs-db-enforcement.md` as a
 checkable in-repo artifact.
 
+**Non-vacuous Postgres substrate — done (2026-05-31).** The recurring
+honesty caveat (audit tier passes vacuously: `NoFKCycle` because
+DuckDB-introspected schemas have no FKs, `BCNF` because nothing declares
+FDs) is now answered with a Postgres-dialect example family that gives
+the audit tier real structure. `examples/shop.sql` (+`.intent`): a
+normalized five-table FK DAG (`order_items → orders → customers`,
+`order_items → products → categories`) where `NoFKCycle` is **PROVEN with
+bite** — the `CyclicShape` coverage probe comes back NOT-realized, so the
+constraints actively forbid cycles — and `BCNF` is **PROVEN per declared
+candidate-key FD** (email/sku are UNIQUE). `examples/shop-cyclic.sql`:
+adds `customers.featured_order_id → orders` (via `ALTER TABLE`, as the
+mutual reference forces) closing a real cross-table cycle → `NoFKCycle`
+**BROKEN**, `CyclicShape` realized. `examples/shop-denormalized.sql`
+(+`.intent`): a denormalized `shipments` table with `zip -> city, state`
+(ZIP not a key) → `BCNF` **BROKEN**, fault-localized to
+`BCNF_shipments_zip__city_state`, candidate-key FDs still passing. All
+verified end-to-end through `check --sql … --alloy` (real Alloy runs,
+exit codes 0/≠0). The shop.sql↔shop-cyclic.sql pair is the deliverable:
+the same property earned-PROVEN on one and BROKEN on the other.
+`examples/README.md` documents the family + run commands. Still text-DDL
+(parsed by `MinardDB.Migration.SQL`); a live `pg_catalog` introspector
+(`tools/introspect-postgres.py` + a `--schema-json` ingest on `check`)
+is the next step toward pointing notothenia at a running Postgres.
+
 **Note: Data Model section below has drifted.** The plan originally
 described a shared `minard_db_*` namespace inside Minard's DuckDB.
 Implementation diverged: notothenia owns `database/notothenia.duckdb`

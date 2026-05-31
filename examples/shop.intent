@@ -1,0 +1,11 @@
+-- notothenia intent for examples/shop.sql
+-- Functional dependencies the DDL can't encode. A `UNIQUE` column is a
+-- candidate key, so an FD whose determinant is that column is
+-- BCNF-respecting — declaring it gives the BCNF proof real content to
+-- chew on instead of passing vacuously.
+
+-- email uniquely identifies a customer (email is UNIQUE → candidate key):
+fd customers: email -> name
+
+-- sku uniquely identifies a product (sku is UNIQUE → candidate key):
+fd products: sku -> name, category_id, price_cents

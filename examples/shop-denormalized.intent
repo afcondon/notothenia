@@ -1,0 +1,10 @@
+-- notothenia intent for examples/shop-denormalized.sql
+
+-- The candidate-key FDs (BCNF-respecting — these still pass):
+fd customers: email -> name
+fd products: sku -> name, category_id, price_cents
+
+-- The BCNF violation: a ZIP determines its city and state, but ZIP is
+-- not a key of `shipments`. The audit tier's BCNF check fails on this
+-- one, fault-localized to this dependency.
+fd shipments: zip -> city, state
