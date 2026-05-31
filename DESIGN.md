@@ -213,6 +213,16 @@ member it actually is.
   red only at step 3 (`DROP TABLE jobs`). Top-level nav
   (Analyses | Migrations) with hash routing (`#m`, `#m/<name>`)
   alongside the existing analysis routes (`#<int>`).
+- **3f (index RI + effective-schema semantics)** — planned; see
+  `docs/phase3f-effective-schema-and-indexes.md`. Motivated by a real
+  boot-crash in the sibling `minard` repo (a `CREATE INDEX` on a column a
+  no-op'd `CREATE TABLE IF NOT EXISTS` never added). Four steps: parse
+  `CREATE INDEX` (3d skipped it), model indexes in the `Migration` ADT,
+  model `IF NOT EXISTS` *no-op-keeps-divergent-table* semantics (so the
+  analyzer runs from a non-empty *effective* schema — the genuinely new
+  modelling), and extend `Migration.Safety`'s column-RI check from FKs to
+  index columns. The `MissingTargetColumn` machinery and 3b temporal model
+  are the substrate.
 
 **Phase 4 — in progress (query reach analysis).**
 
