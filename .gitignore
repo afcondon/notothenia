@@ -23,3 +23,4 @@ bridge/src/_CompileFailTest.purs
 
 # Vendored binaries — installed via the README
 vendor/alloy.jar
+.direnv/
